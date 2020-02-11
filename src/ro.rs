@@ -29,7 +29,7 @@ impl<H: RO + ?Sized> ROOutput<H> {
 
 impl<H: RO + ?Sized> BlockRngCore for ROOutput<H> {
     type Item = u32;
-    type Results = Vec<u32>;
+    type Results = H::BlockOutput;
 
     fn generate(&mut self, results: &mut Self::Results) {
         let outp =
@@ -37,17 +37,15 @@ impl<H: RO + ?Sized> BlockRngCore for ROOutput<H> {
                 .raw();
         let mut iter = outp.as_ref().iter();
         self.ctr += 1;
-        *results = Vec::new();
-        loop {
+        *results = Self::Results::default();
+        for i in 0..results.as_ref().len() {
             let mut nxt = [0; 4];
             for i in 0..4 {
-                if let Some(&b) = iter.next() {
-                    nxt[i] = b;
-                } else {
-                    break;
-                }
+                nxt[i] = *iter.next().expect(
+                    "Block result should match raw result in byte length",
+                );
             }
-            results.push(u32::from_le_bytes(nxt));
+            results.as_mut()[i] = u32::from_le_bytes(nxt);
         }
     }
 }
@@ -64,6 +62,7 @@ impl<H: RO + ?Sized> CryptoRng for ROOutput<H> {}
 
 pub trait RO {
     type RawOutput: AsRef<[u8]> + AsMut<[u8]> + Default;
+    type BlockOutput: AsRef<[u32]> + AsMut<[u32]> + Default;
 
     fn query(i: &[u8]) -> ROOutput<Self>;
 
@@ -78,6 +77,7 @@ pub trait RO {
 
 impl RO for Sha3_256 {
     type RawOutput = [u8; 32];
+    type BlockOutput = [u32; 8];
 
     fn query(i: &[u8]) -> ROOutput<Self> {
         let mut sha = Sha3_256::new();

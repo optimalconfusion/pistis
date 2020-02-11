@@ -241,7 +241,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pistis-impl"
+name = "pistis"
 version = "0.1.0"
 dependencies = [
  "ff 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",

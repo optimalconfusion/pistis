@@ -1,6 +1,5 @@
 use ff::{PrimeField, PrimeFieldRepr, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
-use pairing::Engine;
 
 // Sourced from https://github.com/ebfull/sonic. Licensed under MIT
 pub fn multiexp<
