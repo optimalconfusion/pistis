@@ -89,11 +89,14 @@ where
                         &i.to_le_bytes()[..],
                         &j.to_le_bytes()[..],
                     ][..],
-                ).into_rng().gen();
+                )
+                .into_rng()
+                .gen();
                 let r = T::prove_step_2(x, w, z, c);
                 let rnd = T::H::seq_query(
                     &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-                ).raw();
+                )
+                .raw();
                 let bits = fischlin_bits(rnd.as_ref());
                 if bits < min_val || min_r.is_none() {
                     min_r = Some(r);
@@ -126,13 +129,16 @@ where
                     &i.to_le_bytes()[..],
                     &j.to_le_bytes()[..],
                 ][..],
-            ).into_rng().gen();
+            )
+            .into_rng()
+            .gen();
             if !T::finish_verify(x, t, c, r) {
                 return false;
             }
             let rnd = T::H::seq_query(
                 &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-            ).raw();
+            )
+            .raw();
             let bits = fischlin_bits(rnd.as_ref());
             n += bits;
         }
@@ -177,13 +183,17 @@ where
         rng: &mut R,
     ) -> Self::Proof {
         let (z, t) = Self::prove_step_1(x, w, rng);
-        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]).into_rng().gen();
+        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..])
+            .into_rng()
+            .gen();
         let r = Self::prove_step_2(x, w, z, c);
         (t, r)
     }
 
     fn verify(x: Self::X, &(t, r): &Self::Proof) -> bool {
-        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]).into_rng().gen();
+        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..])
+            .into_rng()
+            .gen();
         Self::finish_verify(x, t, c, r)
     }
 }

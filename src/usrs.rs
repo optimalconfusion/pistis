@@ -1,9 +1,11 @@
 use crate::poe::{CurvePair, FieldPair, NIZK};
-use ff::Field;
+use crate::util::multiexp;
+use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
-use pairing::Engine;
+use pairing::{Engine, PairingCurveAffine};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use rayon::prelude::*;
 
 #[derive(Clone)]
 pub struct USRS<E: Engine> {
@@ -33,14 +35,19 @@ impl<E: Engine> Distribution<Trapdoor<E>> for Standard {
     }
 }
 
-pub struct Update<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> {
+pub struct Update<
+    E: Engine,
+    N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>,
+> {
     srs: USRS<E>,
     h_y: E::G2Affine,
     h_by: E::G2Affine,
     pi: N::Proof,
 }
 
-impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Update<E, N> {
+impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
+    Update<E, N>
+{
     pub fn new<R: Rng + ?Sized>(srs: &USRS<E>, rng: &mut R) -> Self {
         let trapdoor: Trapdoor<E> = rng.gen();
         let mut tmp = E::G2Affine::one().mul(trapdoor.x);
@@ -56,15 +63,11 @@ impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Update<E, 
             srs: srs.permute(&trapdoor),
             h_y: h_y,
             h_by: h_by,
-            pi: N::prove(
-                CurvePair(h_y, h_by),
-                FieldPair(trapdoor.x, by),
-                rng,
-            ),
+            pi: N::prove(CurvePair(h_y, h_by), FieldPair(trapdoor.x, by), rng),
         }
     }
 
-    pub fn verify(&self, srs: &USRS<E>) -> bool {
+    pub fn verify<R: Rng + ?Sized>(&self, srs: &USRS<E>, rng: &mut R) -> bool {
         let d = srs.d;
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
@@ -78,20 +81,19 @@ impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Update<E, 
         if self.srs.g_x[d] != g || self.srs.h_x[d] != h {
             return false;
         }
-        if !N::verify(
-            CurvePair(self.h_y, self.h_by),
-            &self.pi,
-        ) {
+        if !N::verify(CurvePair(self.h_y, self.h_by), &self.pi) {
             return false;
         }
-        // TODO: optimise the number of pairing calls.
-        // TODO: batch pairings -- figure out how that works.
         // e(g, h)^{\alpha\beta xy}
         let t_abxy = e(srs.g_ax[d + 1], self.h_by);
         if e(self.srs.g_ax[d + 1], h) != t_abxy {
             return false;
         }
         if e(g, self.srs.h_ax[d + 1]) != t_abxy {
+            return false;
+        }
+        // constrain e(g, h)^{\alpha\beta (xy)^{-1}}
+        if e(self.srs.g_ax[d - 1], self.srs.h_x[d + 2]) != t_abxy {
             return false;
         }
         // e(g, h)^{xy}
@@ -102,31 +104,68 @@ impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Update<E, 
         if e(g, self.srs.h_x[d + 1]) != t_xy {
             return false;
         }
-        for i in 0..=(2 * d) {
-            if i != 2 * d {
-                let nxt = e(self.srs.g_x[i], self.srs.h_x[d + 1]);
-                if nxt != e(self.srs.g_x[d + 1], self.srs.h_x[i])
-                    || nxt != e(self.srs.g_x[i + 1], h)
-                    || nxt != e(g, self.srs.h_x[i + 1])
-                {
-                    return false;
-                }
-            }
-            if e(self.srs.g_x[i], self.srs.h_ax[d]) != e(g, self.srs.h_ax[i]) {
-                return false;
-            }
-            if i != d
-                && e(self.srs.g_x[i], self.srs.h_ax[d])
-                    != e(self.srs.g_ax[i], h)
-            {
-                return false;
-            }
-        }
-        return true;
+        let g0 = self.srs.g_x[..2 * d]
+            .iter()
+            .chain(self.srs.g_ax[..d - 1].iter())
+            .chain(self.srs.g_ax[d + 1..2 * d].iter())
+            .collect::<Vec<_>>();
+        let g1 = self.srs.g_x[1..]
+            .iter()
+            .chain(self.srs.g_ax[1..d].iter())
+            .chain(self.srs.g_ax[d + 2..].iter())
+            .collect::<Vec<_>>();
+        let h0 = self.srs.h_x[..2 * d]
+            .iter()
+            .chain(self.srs.h_ax[..2 * d].iter())
+            .collect::<Vec<_>>();
+        let h1 = self.srs.h_x[1..]
+            .iter()
+            .chain(self.srs.h_ax[1..].iter())
+            .collect::<Vec<_>>();
+        let rnd0 = vec![<E as ScalarEngine>::Fr::random(rng); 4 * d - 2];
+        let rnd1 = vec![<E as ScalarEngine>::Fr::random(rng); 4 * d];
+        let mut neg_hx = self.srs.h_x[d + 1];
+        neg_hx.negate();
+        let mut neg_gx = self.srs.g_x[d + 1];
+        neg_gx.negate();
+        let table = [
+            (
+                multiexp(g0.into_iter(), rnd0.iter())
+                    .into_affine()
+                    .prepare(),
+                neg_hx.prepare(),
+            ),
+            (
+                multiexp(g1.into_iter(), rnd0.iter())
+                    .into_affine()
+                    .prepare(),
+                E::G2Affine::one().prepare(),
+            ),
+            (
+                neg_gx.prepare(),
+                multiexp(h0.into_iter(), rnd1.iter())
+                    .into_affine()
+                    .prepare(),
+            ),
+            (
+                E::G1Affine::one().prepare(),
+                multiexp(h1.into_iter(), rnd1.iter())
+                    .into_affine()
+                    .prepare(),
+            ),
+        ];
+        let table_ref = table
+            .iter()
+            .map(|&(ref a, ref b)| (a, b))
+            .collect::<Vec<_>>();
+        E::final_exponentiation(&E::miller_loop(&table_ref[..])).unwrap()
+            == E::Fqk::one()
     }
 }
 
-impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Into<USRS<E>> for Update<E, N> {
+impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
+    Into<USRS<E>> for Update<E, N>
+{
     fn into(self) -> USRS<E> {
         self.srs
     }
@@ -146,32 +185,66 @@ impl<E: Engine> USRS<E> {
     pub fn permute(&self, trapdoor: &Trapdoor<E>) -> Self {
         let mut srs = self.clone();
         // beta y^i
-        let mut byi = trapdoor.alpha;
+        let mut byi = vec![trapdoor.alpha];
         // beta y^{-i}
-        let mut neg_byi = trapdoor.alpha;
+        let mut neg_byi = vec![trapdoor.alpha];
         // y^i
-        let mut yi = E::Fr::one();
+        let mut yi = vec![E::Fr::one()];
         // y^{-i}
-        let mut neg_yi = E::Fr::one();
+        let mut neg_yi = vec![E::Fr::one()];
         let x_inv = trapdoor.x.inverse().expect("trapdoor may not be zero");
-        // h^\alpha -> h^\alpha\beta
-        srs.h_ax[self.d] = srs.h_ax[self.d].mul(byi).into_affine();
-        for i in 1..=self.d {
-            byi.mul_assign(&trapdoor.x);
-            yi.mul_assign(&trapdoor.x);
-            neg_byi.mul_assign(&x_inv);
-            neg_yi.mul_assign(&x_inv);
-            srs.g_x[self.d + i] = srs.g_x[self.d + i].mul(yi).into_affine();
-            srs.g_x[self.d - i] = srs.g_x[self.d - i].mul(neg_yi).into_affine();
-            srs.h_x[self.d + i] = srs.h_x[self.d + i].mul(yi).into_affine();
-            srs.h_x[self.d - i] = srs.h_x[self.d - i].mul(neg_yi).into_affine();
-            srs.g_ax[self.d + i] = srs.g_ax[self.d + i].mul(byi).into_affine();
-            srs.g_ax[self.d - i] =
-                srs.g_ax[self.d - i].mul(neg_byi).into_affine();
-            srs.h_ax[self.d + i] = srs.h_ax[self.d + i].mul(byi).into_affine();
-            srs.h_ax[self.d - i] =
-                srs.h_ax[self.d - i].mul(neg_byi).into_affine();
+        // Create vectors of powers
+        for _ in 1..=self.d {
+            let mut tmp = *byi.last().unwrap();
+            tmp.mul_assign(&trapdoor.x);
+            byi.push(tmp);
+            tmp = *neg_byi.last().unwrap();
+            tmp.mul_assign(&x_inv);
+            neg_byi.push(tmp);
+            tmp = *yi.last().unwrap();
+            tmp.mul_assign(&trapdoor.x);
+            yi.push(tmp);
+            tmp = *neg_yi.last().unwrap();
+            tmp.mul_assign(&x_inv);
+            neg_yi.push(tmp);
         }
+        // Convert into one vector of negtive and positive powers
+        neg_byi.reverse();
+        neg_byi.pop();
+        neg_byi.extend(byi);
+        byi = neg_byi;
+        neg_yi.reverse();
+        neg_yi.pop();
+        neg_yi.extend(yi);
+        yi = neg_yi;
+        // h^\alpha -> h^\alpha\beta
+        srs.h_ax[self.d] = srs.h_ax[self.d].mul(byi[0]).into_affine();
+        srs.g_x = self
+            .g_x
+            .par_iter()
+            .zip(yi.par_iter())
+            .map(|(gx, y)| gx.mul(*y).into_affine())
+            .collect();
+        srs.h_x = self
+            .h_x
+            .par_iter()
+            .zip(yi.par_iter())
+            .map(|(hx, y)| hx.mul(*y).into_affine())
+            .collect();
+        srs.g_ax = self
+            .g_ax
+            .par_iter()
+            .zip(byi.par_iter())
+            .map(|(gax, by)| gax.mul(*by).into_affine())
+            .collect();
+        srs.h_ax = self
+            .h_ax
+            .par_iter()
+            .zip(byi.par_iter())
+            .map(|(hax, by)| hax.mul(*by).into_affine())
+            .collect();
+        // Unset g^\alpha.
+        srs.g_ax[self.d] = E::G1Affine::one();
         srs
     }
 }

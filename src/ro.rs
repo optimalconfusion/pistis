@@ -1,6 +1,6 @@
-use sha3::{Digest, Sha3_256};
 use rand_core::block::{BlockRng, BlockRngCore};
 use rand_core::{CryptoRng, SeedableRng};
+use sha3::{Digest, Sha3_256};
 use std::marker::PhantomData;
 
 pub struct ROOutput<H: RO + ?Sized> {
@@ -32,7 +32,9 @@ impl<H: RO + ?Sized> BlockRngCore for ROOutput<H> {
     type Results = Vec<u32>;
 
     fn generate(&mut self, results: &mut Self::Results) {
-        let outp = H::seq_query(&[self.raw.as_ref(), &self.ctr.to_le_bytes()[..]][..]).raw();
+        let outp =
+            H::seq_query(&[self.raw.as_ref(), &self.ctr.to_le_bytes()[..]][..])
+                .raw();
         let mut iter = outp.as_ref().iter();
         self.ctr += 1;
         *results = Vec::new();
@@ -58,7 +60,7 @@ impl<H: RO + ?Sized> SeedableRng for ROOutput<H> {
     }
 }
 
-impl<H: RO + ?Sized> CryptoRng for ROOutput<H> { }
+impl<H: RO + ?Sized> CryptoRng for ROOutput<H> {}
 
 pub trait RO {
     type RawOutput: AsRef<[u8]> + AsMut<[u8]> + Default;

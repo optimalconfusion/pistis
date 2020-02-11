@@ -3,32 +3,53 @@ extern crate group;
 extern crate pairing;
 extern crate rand;
 extern crate rand_core;
+extern crate rayon;
 extern crate sha3;
 
 pub mod poe;
 pub mod ro;
 pub mod usrs;
+mod util;
 
+use ff::ScalarEngine;
 use pairing::bls12_381::Bls12;
 use pairing::Engine;
-use ff::ScalarEngine;
-use rand::Rng;
+use poe::{
+    CurvePair, DualProofOfExponentSigmaProtocol, FieldPair, FischlinTransform,
+    ImplicitNIZK, NIZK,
+};
 use rand::rngs::StdRng;
+use rand::Rng;
 use rand::SeedableRng;
 use sha3::Sha3_256;
 use usrs::{Update, USRS};
-use poe::{FischlinTransform, DualProofOfExponentSigmaProtocol, ImplicitNIZK, CurvePair, FieldPair, NIZK};
 
 type Pairing = Bls12;
 type Hash = Sha3_256;
 
-type Implicit = ImplicitNIZK<CurvePair<<Pairing as Engine>::G2Affine>, FieldPair<<Pairing as ScalarEngine>::Fr>, Hash>;
-type Sigma = DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>;
-type Fischlin = FischlinTransform<DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>>;
+type Implicit = ImplicitNIZK<
+    CurvePair<<Pairing as Engine>::G2Affine>,
+    FieldPair<<Pairing as ScalarEngine>::Fr>,
+    Hash,
+>;
+type Sigma =
+    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>;
+type Fischlin = FischlinTransform<
+    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>,
+>;
 
-fn run_test_update<N: NIZK<X=CurvePair<<Pairing as Engine>::G2Affine>,W=FieldPair<<Pairing as ScalarEngine>::Fr>>, R: Rng + ?Sized>(srs: USRS<Pairing>, rng: &mut R) {
+fn run_test_update<
+    N: NIZK<
+        X = CurvePair<<Pairing as Engine>::G2Affine>,
+        W = FieldPair<<Pairing as ScalarEngine>::Fr>,
+    >,
+    R: Rng + ?Sized,
+>(
+    srs: USRS<Pairing>,
+    rng: &mut R,
+) {
     let u1 = Update::<Pairing, N>::new(&srs, rng);
-    assert!(u1.verify(&srs));
+    assert!(u1.verify(&srs, rng));
 }
 
 fn main() {
