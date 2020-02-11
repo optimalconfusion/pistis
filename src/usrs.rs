@@ -1,17 +1,9 @@
-use crate::poe::{
-    CurvePair, DualProofOfExponentSigmaProtocol, FieldPair, FischlinTransform,
-    ImplicitNIZK, NIZK,
-};
-use crate::ro::RO;
+use crate::poe::{CurvePair, FieldPair, NIZK};
 use ff::Field;
 use group::{CurveAffine, CurveProjective};
 use pairing::Engine;
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
-
-//type DPoE<C, H> = ImplicitNIZK<CurvePair<C>, FieldPair<<C as CurveAffine>::Scalar>, H>;
-//type DPoE<C, H> = DualProofOfExponentSigmaProtocol<C, H>;
-type DPoE<C, H> = FischlinTransform<DualProofOfExponentSigmaProtocol<C, H>>;
 
 #[derive(Clone)]
 pub struct USRS<E: Engine> {
@@ -41,14 +33,14 @@ impl<E: Engine> Distribution<Trapdoor<E>> for Standard {
     }
 }
 
-pub struct Update<E: Engine, H: RO> {
+pub struct Update<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> {
     srs: USRS<E>,
     h_y: E::G2Affine,
     h_by: E::G2Affine,
-    pi: <DPoE<E::G2Affine, H> as NIZK>::Proof,
+    pi: N::Proof,
 }
 
-impl<E: Engine, H: RO> Update<E, H> {
+impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Update<E, N> {
     pub fn new<R: Rng + ?Sized>(srs: &USRS<E>, rng: &mut R) -> Self {
         let trapdoor: Trapdoor<E> = rng.gen();
         let mut tmp = E::G2Affine::one().mul(trapdoor.x);
@@ -64,7 +56,7 @@ impl<E: Engine, H: RO> Update<E, H> {
             srs: srs.permute(&trapdoor),
             h_y: h_y,
             h_by: h_by,
-            pi: DPoE::<E::G2Affine, H>::prove(
+            pi: N::prove(
                 CurvePair(h_y, h_by),
                 FieldPair(trapdoor.x, by),
                 rng,
@@ -86,7 +78,7 @@ impl<E: Engine, H: RO> Update<E, H> {
         if self.srs.g_x[d] != g || self.srs.h_x[d] != h {
             return false;
         }
-        if !DPoE::<E::G2Affine, H>::verify(
+        if !N::verify(
             CurvePair(self.h_y, self.h_by),
             &self.pi,
         ) {
@@ -134,7 +126,7 @@ impl<E: Engine, H: RO> Update<E, H> {
     }
 }
 
-impl<E: Engine, H: RO> Into<USRS<E>> for Update<E, H> {
+impl<E: Engine, N: NIZK<X=CurvePair<E::G2Affine>,W=FieldPair<E::Fr>>> Into<USRS<E>> for Update<E, N> {
     fn into(self) -> USRS<E> {
         self.srs
     }

@@ -2,9 +2,7 @@ use crate::ro::RO;
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand::distributions::{Distribution, Standard};
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha20Rng;
-use std::convert::TryInto;
+use rand::Rng;
 use std::marker::PhantomData;
 
 pub trait NIZK {
@@ -84,23 +82,19 @@ where
             let mut min_r: Option<T::R> = None;
             let mut min_val: u32 = u32::max_value();
             for j in 0..FISHLIN_SAMPLES {
-                let rnd = T::H::seq_query(
+                let c = T::H::seq_query(
                     &[
                         &x.into()[..],
                         &t.into()[..],
                         &i.to_le_bytes()[..],
                         &j.to_le_bytes()[..],
                     ][..],
-                );
-                let mut rnd_rng = ChaCha20Rng::from_seed(
-                    rnd[..32].try_into().expect("32 byte seed expected"),
-                );
-                let c = rnd_rng.gen();
+                ).into_rng().gen();
                 let r = T::prove_step_2(x, w, z, c);
-                let rnd2 = T::H::seq_query(
+                let rnd = T::H::seq_query(
                     &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-                );
-                let bits = fischlin_bits(&rnd2[..]);
+                ).raw();
+                let bits = fischlin_bits(rnd.as_ref());
                 if bits < min_val || min_r.is_none() {
                     min_r = Some(r);
                     min_val = bits;
@@ -125,25 +119,21 @@ where
         }
         let mut n = 0;
         for (i, &(t, j, r)) in pi.iter().enumerate() {
-            let rnd = T::H::seq_query(
+            let c = T::H::seq_query(
                 &[
                     &x.into()[..],
                     &t.into()[..],
                     &i.to_le_bytes()[..],
                     &j.to_le_bytes()[..],
                 ][..],
-            );
-            let mut rnd_rng = ChaCha20Rng::from_seed(
-                rnd[..32].try_into().expect("32 byte seed expected"),
-            );
-            let c = rnd_rng.gen();
+            ).into_rng().gen();
             if !T::finish_verify(x, t, c, r) {
                 return false;
             }
-            let rnd2 = T::H::seq_query(
+            let rnd = T::H::seq_query(
                 &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-            );
-            let bits = fischlin_bits(&rnd2[..]);
+            ).raw();
+            let bits = fischlin_bits(rnd.as_ref());
             n += bits;
         }
         return n <= FISHLIN_SUM;
@@ -157,7 +147,7 @@ pub trait SigmaProtocol {
     type T: Copy;
     type C: Copy;
     type R: Copy;
-    type H: RO;
+    type H: RO + ?Sized;
 
     /// Step 1: Create commitments.
     fn prove_step_1<R: Rng + ?Sized>(
@@ -187,26 +177,18 @@ where
         rng: &mut R,
     ) -> Self::Proof {
         let (z, t) = Self::prove_step_1(x, w, rng);
-        let rnd = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]);
-        let mut rnd_rng = ChaCha20Rng::from_seed(
-            rnd[..32].try_into().expect("32 byte seed expected"),
-        );
-        let c = rnd_rng.gen();
+        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]).into_rng().gen();
         let r = Self::prove_step_2(x, w, z, c);
         (t, r)
     }
 
     fn verify(x: Self::X, &(t, r): &Self::Proof) -> bool {
-        let rnd = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]);
-        let mut rnd_rng = ChaCha20Rng::from_seed(
-            rnd[..32].try_into().expect("32 byte seed expected"),
-        );
-        let c = rnd_rng.gen();
+        let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..]).into_rng().gen();
         Self::finish_verify(x, t, c, r)
     }
 }
 
-pub struct DualProofOfExponentSigmaProtocol<C: CurveAffine, H: RO> {
+pub struct DualProofOfExponentSigmaProtocol<C: CurveAffine, H: RO + ?Sized> {
     phantom: PhantomData<(C, H)>,
 }
 
@@ -243,7 +225,7 @@ impl<F: PrimeField> Distribution<FieldPair<F>> for Standard {
     }
 }
 
-impl<C: CurveAffine, H: RO> SigmaProtocol
+impl<C: CurveAffine, H: RO + ?Sized> SigmaProtocol
     for DualProofOfExponentSigmaProtocol<C, H>
 {
     type X = CurvePair<C>;
