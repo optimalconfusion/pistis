@@ -1,20 +1,23 @@
-use crate::ro::RO;
+use crate::ro::{RO, ROOutput};
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use rand_core::block::BlockRng;
 use std::marker::PhantomData;
+use rayon::prelude::*;
 
 pub trait NIZK {
     type X;
     type W;
     type Proof;
 
-    fn prove<R: Rng + ?Sized>(
+    fn prove<H: RO + ?Sized>(
         x: Self::X,
         w: Self::W,
-        rng: &mut R,
-    ) -> Self::Proof;
+        rng: &mut BlockRng<ROOutput<H>>,
+    ) -> Self::Proof
+        where ROOutput<H>: Send;
     fn verify(x: Self::X, pi: &Self::Proof) -> bool;
 }
 
@@ -25,10 +28,10 @@ impl<X, W, H> NIZK for ImplicitNIZK<X, W, H> {
     type W = W;
     type Proof = ();
 
-    fn prove<R: Rng + ?Sized>(
+    fn prove<F: RO + ?Sized>(
         _: Self::X,
         _: Self::W,
-        _: &mut R,
+        _: &mut BlockRng<ROOutput<F>>,
     ) -> Self::Proof {
         ()
     }
@@ -60,24 +63,28 @@ fn fischlin_bits(bytes: &[u8]) -> u32 {
 impl<T: SigmaProtocol> NIZK for FischlinTransform<T>
 where
     Standard: Distribution<T::C>,
-    T::X: Into<Vec<u8>>,
-    T::T: Into<Vec<u8>>,
+    T::X: Into<Vec<u8>> + Sync,
+    T::W: Sync,
+    T::T: Into<Vec<u8>> + Send,
     T::C: Into<Vec<u8>>,
-    T::R: Into<Vec<u8>>,
+    T::R: Into<Vec<u8>> + Send,
+    (T::T, usize, T::R): Sync,
 {
     type X = T::X;
     type W = T::W;
     type Proof = Vec<(T::T, usize, T::R)>;
 
-    fn prove<R: Rng + ?Sized>(
+    fn prove<F: RO + ?Sized>(
         x: Self::X,
         w: Self::W,
-        rng: &mut R,
-    ) -> Self::Proof {
-        // Safe as each point will be initialised before read.
-        let mut pi = Vec::new();
-        for i in 0..FISHLIN_REPETITIONS {
-            let (z, t) = T::prove_step_1(x, w, rng);
+        rng: &mut BlockRng<ROOutput<F>>,
+    ) -> Self::Proof
+        where ROOutput<F>: Send,
+    {
+        let rngs = (0..FISHLIN_REPETITIONS).map(|_| rng.core.split()).collect::<Vec<_>>();
+        rngs.into_par_iter().enumerate().map(|(i, seed)| {
+            let mut rng = seed.into_rng();
+            let (z, t) = T::prove_step_1(x, w, &mut rng);
             let mut min_idx: usize = 0;
             let mut min_r: Option<T::R> = None;
             let mut min_val: u32 = u32::max_value();
@@ -107,21 +114,19 @@ where
                     }
                 };
             }
-            pi.push((
+            (
                 t,
                 min_idx,
                 min_r.expect("at least one sample is generated"),
-            ));
-        }
-        pi
+            )
+        }).collect::<Vec<_>>()
     }
 
     fn verify(x: Self::X, pi: &Self::Proof) -> bool {
         if pi.len() != FISHLIN_REPETITIONS {
             return false;
         }
-        let mut n = 0;
-        for (i, &(t, j, r)) in pi.iter().enumerate() {
+        let bits = pi.par_iter().enumerate().map(|(i, &(t, j, r))| {
             let c = T::H::seq_query(
                 &[
                     &x.into()[..],
@@ -133,16 +138,19 @@ where
             .into_rng()
             .gen();
             if !T::finish_verify(x, t, c, r) {
-                return false;
+                None
+            } else {
+                let rnd = T::H::seq_query(
+                    &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
+                )
+                .raw();
+                Some(fischlin_bits(rnd.as_ref()))
             }
-            let rnd = T::H::seq_query(
-                &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-            )
-            .raw();
-            let bits = fischlin_bits(rnd.as_ref());
-            n += bits;
+        }).collect::<Vec<_>>();
+        if bits.iter().any(|b| b.is_none()) {
+            return false;
         }
-        return n <= FISHLIN_SUM;
+        bits.iter().fold(0, |n, b| n + b.unwrap()) <= FISHLIN_SUM
     }
 }
 
@@ -177,10 +185,10 @@ where
     type W = T::W;
     type Proof = (T::T, T::R);
 
-    fn prove<R: Rng + ?Sized>(
+    fn prove<H: RO + ?Sized>(
         x: Self::X,
         w: Self::W,
-        rng: &mut R,
+        rng: &mut BlockRng<ROOutput<H>>,
     ) -> Self::Proof {
         let (z, t) = Self::prove_step_1(x, w, rng);
         let c = T::H::seq_query(&[&x.into()[..], &t.into()[..]][..])

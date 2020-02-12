@@ -1,5 +1,7 @@
 use crate::poe::{CurvePair, FieldPair, NIZK};
 use crate::util::multiexp;
+use crate::ro::{RO, ROOutput};
+use rand_core::block::BlockRng;
 use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
@@ -48,7 +50,7 @@ pub struct Update<
 impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
-    pub fn new<R: Rng + ?Sized>(srs: &USRS<E>, rng: &mut R) -> Self {
+    pub fn new<H: RO + ?Sized>(srs: &USRS<E>, rng: &mut BlockRng<ROOutput<H>>) -> Self where ROOutput<H>: Send {
         let trapdoor: Trapdoor<E> = rng.gen();
         let mut tmp = E::G2Affine::one().mul(trapdoor.x);
         let h_y = tmp.into_affine();
@@ -158,7 +160,8 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
             .iter()
             .map(|&(ref a, ref b)| (a, b))
             .collect::<Vec<_>>();
-        E::final_exponentiation(&E::miller_loop(&table_ref[..])).unwrap()
+        let lp = E::miller_loop(&table_ref[..]);
+        E::final_exponentiation(&lp).unwrap()
             == E::Fqk::one()
     }
 }

@@ -1,7 +1,9 @@
 use ff::{PrimeField, PrimeFieldRepr, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
+use rayon::prelude::*;
 
 // Sourced from https://github.com/ebfull/sonic. Licensed under MIT
+// Adapted to introduce parallelism.
 pub fn multiexp<
     'a,
     G: CurveAffine,
@@ -12,8 +14,8 @@ pub fn multiexp<
     s: IS,
 ) -> G::Projective
 where
-    IB::IntoIter: ExactSizeIterator + Clone,
-    IS::IntoIter: ExactSizeIterator,
+    IB::IntoIter: ExactSizeIterator + Clone + Send,
+    IS::IntoIter: ExactSizeIterator + Clone + Send,
 {
     let g = g.into_iter();
     let s = s.into_iter();
@@ -26,29 +28,24 @@ where
     };
 
     // Convert all of the scalars into representations
-    let mut s = s.map(|s| s.into_repr()).collect::<Vec<_>>();
-
-    let mut windows = vec![];
-    let mut buckets = vec![];
+    let s = s.map(|s| s.into_repr()).collect::<Vec<_>>();
 
     let mask = (1u64 << c) - 1u64;
-    let mut cur = 0;
-    while cur <= <G::Engine as ScalarEngine>::Fr::NUM_BITS {
+    let max_iters = (<G::Engine as ScalarEngine>::Fr::NUM_BITS as f64 / c as f64).ceil() as usize;
+    let windows = (0..max_iters).map(|i| (i, g.clone(), s.clone())).collect::<Vec<_>>().into_par_iter().map(|(cur, g, s)| {
         let mut acc = G::Projective::zero();
+        let mut buckets = Vec::new();
 
         buckets.truncate(0);
         buckets.resize((1 << c) - 1, G::Projective::zero());
 
-        let g = g.clone();
-
-        for (s, g) in s.iter_mut().zip(g) {
+        for (&(mut s), g) in s.iter().zip(g) {
+            s.shr(cur as u32 * c);
             let index = (s.as_ref()[0] & mask) as usize;
 
             if index != 0 {
                 buckets[index - 1].add_assign_mixed(g);
             }
-
-            s.shr(c as u32);
         }
 
         let mut running_sum = G::Projective::zero();
@@ -56,11 +53,8 @@ where
             running_sum.add_assign(exp);
             acc.add_assign(&running_sum);
         }
-
-        windows.push(acc);
-
-        cur += c;
-    }
+        acc
+    }).collect::<Vec<_>>();
 
     let mut acc = G::Projective::zero();
 
