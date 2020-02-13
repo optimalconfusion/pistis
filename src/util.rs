@@ -31,30 +31,37 @@ where
     let s = s.map(|s| s.into_repr()).collect::<Vec<_>>();
 
     let mask = (1u64 << c) - 1u64;
-    let max_iters = (<G::Engine as ScalarEngine>::Fr::NUM_BITS as f64 / c as f64).ceil() as usize;
-    let windows = (0..max_iters).map(|i| (i, g.clone(), s.clone())).collect::<Vec<_>>().into_par_iter().map(|(cur, g, s)| {
-        let mut acc = G::Projective::zero();
-        let mut buckets = Vec::new();
+    let max_iters = (<G::Engine as ScalarEngine>::Fr::NUM_BITS as f64
+        / c as f64)
+        .ceil() as usize;
+    let windows = (0..max_iters)
+        .map(|i| (i, g.clone(), s.clone()))
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|(cur, g, s)| {
+            let mut acc = G::Projective::zero();
+            let mut buckets = Vec::new();
 
-        buckets.truncate(0);
-        buckets.resize((1 << c) - 1, G::Projective::zero());
+            buckets.truncate(0);
+            buckets.resize((1 << c) - 1, G::Projective::zero());
 
-        for (&(mut s), g) in s.iter().zip(g) {
-            s.shr(cur as u32 * c);
-            let index = (s.as_ref()[0] & mask) as usize;
+            for (&(mut s), g) in s.iter().zip(g) {
+                s.shr(cur as u32 * c);
+                let index = (s.as_ref()[0] & mask) as usize;
 
-            if index != 0 {
-                buckets[index - 1].add_assign_mixed(g);
+                if index != 0 {
+                    buckets[index - 1].add_assign_mixed(g);
+                }
             }
-        }
 
-        let mut running_sum = G::Projective::zero();
-        for exp in buckets.iter().rev() {
-            running_sum.add_assign(exp);
-            acc.add_assign(&running_sum);
-        }
-        acc
-    }).collect::<Vec<_>>();
+            let mut running_sum = G::Projective::zero();
+            for exp in buckets.iter().rev() {
+                running_sum.add_assign(exp);
+                acc.add_assign(&running_sum);
+            }
+            acc
+        })
+        .collect::<Vec<_>>();
 
     let mut acc = G::Projective::zero();
 

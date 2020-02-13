@@ -1,12 +1,12 @@
 use crate::poe::{CurvePair, FieldPair, NIZK};
+use crate::ro::{ROOutput, RO};
 use crate::util::multiexp;
-use crate::ro::{RO, ROOutput};
-use rand_core::block::BlockRng;
 use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use rand_core::block::BlockRng;
 use rayon::prelude::*;
 
 #[derive(Clone)]
@@ -50,7 +50,13 @@ pub struct Update<
 impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
-    pub fn new<H: RO + ?Sized>(srs: &USRS<E>, rng: &mut BlockRng<ROOutput<H>>) -> Self where ROOutput<H>: Send {
+    pub fn new<H: RO + ?Sized>(
+        srs: &USRS<E>,
+        rng: &mut BlockRng<ROOutput<H>>,
+    ) -> Self
+    where
+        ROOutput<H>: Send,
+    {
         let trapdoor: Trapdoor<E> = rng.gen();
         let mut tmp = E::G2Affine::one().mul(trapdoor.x);
         let h_y = tmp.into_affine();
@@ -161,8 +167,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G2Affine>, W = FieldPair<E::Fr>>>
             .map(|&(ref a, ref b)| (a, b))
             .collect::<Vec<_>>();
         let lp = E::miller_loop(&table_ref[..]);
-        E::final_exponentiation(&lp).unwrap()
-            == E::Fqk::one()
+        E::final_exponentiation(&lp).unwrap() == E::Fqk::one()
     }
 }
 

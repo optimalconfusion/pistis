@@ -11,17 +11,17 @@ pub mod ro;
 pub mod usrs;
 mod util;
 
-use std::time::Instant;
 use ff::ScalarEngine;
 use pairing::bls12_381::Bls12;
 use pairing::Engine;
-use rand_core::block::BlockRng;
-use ro::{RO, ROOutput};
 use poe::{
     CurvePair, DualProofOfExponentSigmaProtocol, FieldPair, FischlinTransform,
     ImplicitNIZK, NIZK,
 };
+use rand_core::block::BlockRng;
+use ro::{ROOutput, RO};
 use sha3::Sha3_256;
+use std::time::Instant;
 use usrs::{Update, USRS};
 
 type Pairing = Bls12;
@@ -47,9 +47,8 @@ fn run_test_update<
 >(
     srs: USRS<Pairing>,
     rng: &mut BlockRng<ROOutput<H>>,
-)
-where
-  ROOutput<H>: Send,
+) where
+    ROOutput<H>: Send,
 {
     let start = Instant::now();
     let u1 = Update::<Pairing, N>::new(&srs, rng);
@@ -61,9 +60,10 @@ where
 
 fn main() {
     let mut rng = Sha3_256::query(&[
-        0x2a, 0xb1, 0x74, 0x52, 0x0f, 0x19, 0x34, 0x2a,
-        0x60, 0x1d, 0xe2, 0x7e, 0xa8, 0x97, 0x34, 0xb9,
-    ]).into_rng();
+        0x2a, 0xb1, 0x74, 0x52, 0x0f, 0x19, 0x34, 0x2a, 0x60, 0x1d, 0xe2, 0x7e,
+        0xa8, 0x97, 0x34, 0xb9,
+    ])
+    .into_rng();
 
     let srs0: USRS<Pairing> = USRS::new(100_000);
     let srs1 = Update::<Pairing, Implicit>::new(&srs0, &mut rng).into();

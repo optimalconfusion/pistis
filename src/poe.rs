@@ -1,11 +1,11 @@
-use crate::ro::{RO, ROOutput};
+use crate::ro::{ROOutput, RO};
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
 use rand_core::block::BlockRng;
-use std::marker::PhantomData;
 use rayon::prelude::*;
+use std::marker::PhantomData;
 
 pub trait NIZK {
     type X;
@@ -17,7 +17,8 @@ pub trait NIZK {
         w: Self::W,
         rng: &mut BlockRng<ROOutput<H>>,
     ) -> Self::Proof
-        where ROOutput<H>: Send;
+    where
+        ROOutput<H>: Send;
     fn verify(x: Self::X, pi: &Self::Proof) -> bool;
 }
 
@@ -79,16 +80,59 @@ where
         w: Self::W,
         rng: &mut BlockRng<ROOutput<F>>,
     ) -> Self::Proof
-        where ROOutput<F>: Send,
+    where
+        ROOutput<F>: Send,
     {
-        let rngs = (0..FISHLIN_REPETITIONS).map(|_| rng.core.split()).collect::<Vec<_>>();
-        rngs.into_par_iter().enumerate().map(|(i, seed)| {
-            let mut rng = seed.into_rng();
-            let (z, t) = T::prove_step_1(x, w, &mut rng);
-            let mut min_idx: usize = 0;
-            let mut min_r: Option<T::R> = None;
-            let mut min_val: u32 = u32::max_value();
-            for j in 0..FISHLIN_SAMPLES {
+        let rngs = (0..FISHLIN_REPETITIONS)
+            .map(|_| rng.core.split())
+            .collect::<Vec<_>>();
+        rngs.into_par_iter()
+            .enumerate()
+            .map(|(i, seed)| {
+                let mut rng = seed.into_rng();
+                let (z, t) = T::prove_step_1(x, w, &mut rng);
+                let mut min_idx: usize = 0;
+                let mut min_r: Option<T::R> = None;
+                let mut min_val: u32 = u32::max_value();
+                for j in 0..FISHLIN_SAMPLES {
+                    let c = T::H::seq_query(
+                        &[
+                            &x.into()[..],
+                            &t.into()[..],
+                            &i.to_le_bytes()[..],
+                            &j.to_le_bytes()[..],
+                        ][..],
+                    )
+                    .into_rng()
+                    .gen();
+                    let r = T::prove_step_2(x, w, z, c);
+                    let rnd = T::H::seq_query(
+                        &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
+                    )
+                    .raw();
+                    let bits = fischlin_bits(rnd.as_ref());
+                    if bits < min_val || min_r.is_none() {
+                        min_r = Some(r);
+                        min_val = bits;
+                        min_idx = j;
+                        if bits == 0 {
+                            break;
+                        }
+                    };
+                }
+                (t, min_idx, min_r.expect("at least one sample is generated"))
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn verify(x: Self::X, pi: &Self::Proof) -> bool {
+        if pi.len() != FISHLIN_REPETITIONS {
+            return false;
+        }
+        let bits = pi
+            .par_iter()
+            .enumerate()
+            .map(|(i, &(t, j, r))| {
                 let c = T::H::seq_query(
                     &[
                         &x.into()[..],
@@ -99,54 +143,17 @@ where
                 )
                 .into_rng()
                 .gen();
-                let r = T::prove_step_2(x, w, z, c);
-                let rnd = T::H::seq_query(
-                    &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-                )
-                .raw();
-                let bits = fischlin_bits(rnd.as_ref());
-                if bits < min_val || min_r.is_none() {
-                    min_r = Some(r);
-                    min_val = bits;
-                    min_idx = j;
-                    if bits == 0 {
-                        break;
-                    }
-                };
-            }
-            (
-                t,
-                min_idx,
-                min_r.expect("at least one sample is generated"),
-            )
-        }).collect::<Vec<_>>()
-    }
-
-    fn verify(x: Self::X, pi: &Self::Proof) -> bool {
-        if pi.len() != FISHLIN_REPETITIONS {
-            return false;
-        }
-        let bits = pi.par_iter().enumerate().map(|(i, &(t, j, r))| {
-            let c = T::H::seq_query(
-                &[
-                    &x.into()[..],
-                    &t.into()[..],
-                    &i.to_le_bytes()[..],
-                    &j.to_le_bytes()[..],
-                ][..],
-            )
-            .into_rng()
-            .gen();
-            if !T::finish_verify(x, t, c, r) {
-                None
-            } else {
-                let rnd = T::H::seq_query(
-                    &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
-                )
-                .raw();
-                Some(fischlin_bits(rnd.as_ref()))
-            }
-        }).collect::<Vec<_>>();
+                if !T::finish_verify(x, t, c, r) {
+                    None
+                } else {
+                    let rnd = T::H::seq_query(
+                        &[&t.into()[..], &c.into()[..], &r.into()[..]][..],
+                    )
+                    .raw();
+                    Some(fischlin_bits(rnd.as_ref()))
+                }
+            })
+            .collect::<Vec<_>>();
         if bits.iter().any(|b| b.is_none()) {
             return false;
         }

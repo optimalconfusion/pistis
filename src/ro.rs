@@ -24,7 +24,7 @@ impl<H: RO + ?Sized> ROOutput<H> {
         let mut seed = H::RawOutput::default();
         for (i, w) in res.as_ref().iter().enumerate() {
             for j in 0..4 {
-                seed.as_mut()[4*i + j] = ((*w >> (32 - 8*j)) & 0xff) as u8;
+                seed.as_mut()[4 * i + j] = ((*w >> (32 - 8 * j)) & 0xff) as u8;
             }
         }
         ROOutput {
