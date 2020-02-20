@@ -69,11 +69,11 @@ where
     T::T: Into<Vec<u8>> + Send,
     T::C: Into<Vec<u8>>,
     T::R: Into<Vec<u8>> + Send,
-    (T::T, usize, T::R): Sync,
+    (T::T, u16, T::R): Sync,
 {
     type X = T::X;
     type W = T::W;
-    type Proof = Vec<(T::T, usize, T::R)>;
+    type Proof = Vec<(T::T, u16, T::R)>;
 
     fn prove<F: RO + ?Sized>(
         x: Self::X,
@@ -99,8 +99,8 @@ where
                         &[
                             &x.into()[..],
                             &t.into()[..],
-                            &i.to_le_bytes()[..],
-                            &j.to_le_bytes()[..],
+                            &(i as u8).to_le_bytes()[..],
+                            &(j as u16).to_le_bytes()[..],
                         ][..],
                     )
                     .into_rng()
@@ -120,7 +120,7 @@ where
                         }
                     };
                 }
-                (t, min_idx, min_r.expect("at least one sample is generated"))
+                (t, min_idx as u16, min_r.expect("at least one sample is generated"))
             })
             .collect::<Vec<_>>()
     }
@@ -137,8 +137,8 @@ where
                     &[
                         &x.into()[..],
                         &t.into()[..],
-                        &i.to_le_bytes()[..],
-                        &j.to_le_bytes()[..],
+                        &(i as u8).to_le_bytes()[..],
+                        &(j as u16).to_le_bytes()[..],
                     ][..],
                 )
                 .into_rng()

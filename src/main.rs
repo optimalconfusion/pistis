@@ -28,19 +28,19 @@ type Pairing = Bls12;
 type Hash = Sha3_256;
 
 type Implicit = ImplicitNIZK<
-    CurvePair<<Pairing as Engine>::G2Affine>,
+    CurvePair<<Pairing as Engine>::G1Affine>,
     FieldPair<<Pairing as ScalarEngine>::Fr>,
     Hash,
 >;
 type Sigma =
-    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>;
+    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G1Affine, Hash>;
 type Fischlin = FischlinTransform<
-    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G2Affine, Hash>,
+    DualProofOfExponentSigmaProtocol<<Pairing as Engine>::G1Affine, Hash>,
 >;
 
 fn run_test_update<
     N: NIZK<
-        X = CurvePair<<Pairing as Engine>::G2Affine>,
+        X = CurvePair<<Pairing as Engine>::G1Affine>,
         W = FieldPair<<Pairing as ScalarEngine>::Fr>,
     >,
     H: RO + ?Sized,
@@ -65,7 +65,7 @@ fn main() {
     ])
     .into_rng();
 
-    let srs0: USRS<Pairing> = USRS::new(100_000);
+    let srs0: USRS<Pairing> = USRS::new(1_000);
     let srs1 = Update::<Pairing, Implicit>::new(&srs0, &mut rng).into();
     if option_env!("PISTIS_FISCHLIN").is_some() {
         run_test_update::<Fischlin, _>(srs1, &mut rng);

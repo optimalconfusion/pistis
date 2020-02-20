@@ -12,7 +12,7 @@ use rand::Rng;
 use sha3::Sha3_256;
 
 type Fischlin =
-    FischlinTransform<DualProofOfExponentSigmaProtocol<G2Affine, Sha3_256>>;
+    FischlinTransform<DualProofOfExponentSigmaProtocol<G1Affine, Sha3_256>>;
 
 const DS: &'static [usize] = &[
     0x00_00_10, 0x00_00_20, 0x00_00_40, 0x00_00_80, 0x00_01_00, 0x00_02_00,
