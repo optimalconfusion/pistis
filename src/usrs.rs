@@ -7,14 +7,16 @@ use pairing::{Engine, PairingCurveAffine};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
 use rand_core::block::BlockRng;
+use rayon::iter::once;
 use rayon::prelude::*;
 use std::io::{self, Write};
-use std::iter::once;
 
 macro_rules! check {
-    ($x:expr) => {{ if !$x {
-        return false;
-    }}}
+    ($x:expr) => {{
+        if !$x {
+            return false;
+        }
+    }};
 }
 
 #[derive(Clone)]
@@ -105,7 +107,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     }
 }
 
-struct UpdatePart<
+pub struct UpdatePart<
     E: Engine,
     N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>,
 > {
@@ -121,10 +123,14 @@ pub struct AggregateUpdate<
     N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>,
 > {
     srs: USRS<E>,
-    upds: Vec<UpdatePart<E, N>>
+    upds: Vec<UpdatePart<E, N>>,
 }
 
-impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>> AggregateUpdate<E, N> {
+impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
+    AggregateUpdate<E, N>
+where
+    UpdatePart<E, N>: Send + Sync,
+{
     pub fn new(d: usize) -> Self {
         AggregateUpdate {
             srs: USRS::new(d),
@@ -148,16 +154,48 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>> Aggre
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
         let e = E::pairing;
-        check!(self.upds.iter().all(|u| N::verify(CurvePair(u.g_y, u.g_by), &u.pi)));
-        check!(self.upds.iter().all(|u| u.g_y != g && u.g_by != g));
+        check!(self
+            .upds
+            .par_iter()
+            .all(|u| N::verify(CurvePair(u.g_y, u.g_by), &u.pi)));
+        check!(self.upds.par_iter().all(|u| u.g_y != g && u.g_by != g));
         check!(self.upds[0].h_x == h);
         check!(self.upds[0].h_ax == h);
-        let h_xs = self.upds.iter().map(|u| u.h_x).chain(self.upds.iter().map(|u| u.h_ax));
-        let h_xys = self.upds[1..].iter().map(|u| u.h_x).chain(once(self.srs.h_x[self.srs.d + 1])).chain(self.upds[1..].iter().map(|u| u.h_ax)).chain(once(self.srs.h_ax[self.srs.d + 1]));
-        let g_ys = self.upds.iter().map(|u| u.g_y).chain(self.upds.iter().map(|u| u.g_by));
-        for ((h_x, h_xy), g_y) in h_xs.zip(h_xys).zip(g_ys) {
-            check!(e(g_y, h_x) == e(g, h_xy));
-        }
+        let h_xs = self
+            .upds
+            .par_iter()
+            .map(|u| u.h_x)
+            .chain(self.upds.par_iter().map(|u| u.h_ax));
+        let h_xys = self.upds[1..]
+            .par_iter()
+            .map(|u| u.h_x)
+            .chain(once(self.srs.h_x[self.srs.d + 1]))
+            .chain(self.upds[1..].par_iter().map(|u| u.h_ax))
+            .chain(once(self.srs.h_ax[self.srs.d + 1]))
+            .collect::<Vec<_>>();
+        let g_ys = self
+            .upds
+            .par_iter()
+            .map(|u| u.g_y)
+            .chain(self.upds.par_iter().map(|u| u.g_by));
+        let rnd =
+            vec![<E as ScalarEngine>::Fr::random(rng); 2 * self.upds.len()];
+        let mut neg_g = g;
+        neg_g.negate();
+        let rhs = E::final_exponentiation(&E::miller_loop(&[(
+            &g.prepare(),
+            &multiexp(h_xys.iter(), rnd.iter()).into_affine().prepare(),
+        )]))
+        .unwrap();
+        let lhs = g_ys
+            .zip(h_xs)
+            .zip(rnd)
+            .map(|((g_y, h_x), r)| e(g_y.mul(r), h_x))
+            .reduce(E::Fqk::one, |mut a, b| {
+                a.mul_assign(&b);
+                a
+            });
+        check!(lhs == rhs);
         check!(self.srs.verify_structure(rng));
         true
     }
@@ -171,7 +209,9 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     }
 }
 
-impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>> AsRef<USRS<E>> for AggregateUpdate<E, N> {
+impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
+    AsRef<USRS<E>> for AggregateUpdate<E, N>
+{
     fn as_ref(&self) -> &USRS<E> {
         &self.srs
     }

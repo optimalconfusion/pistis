@@ -2,12 +2,12 @@ use pistis::ro::RO;
 use rand::distributions::Distribution;
 use rand::Rng;
 use rand_distr::Exp;
+use rayon::prelude::*;
 use sha3::Sha3_256;
-use std::fs::{create_dir_all, File};
-use std::io::{Write, stdout};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use rayon::prelude::*;
+use std::fs::{create_dir_all, File};
+use std::io::{stdout, Write};
 
 #[derive(Copy, Clone)]
 pub struct ConsensusParameters {
@@ -50,7 +50,11 @@ impl ConsensusState {
     }
 
     /// Does the next thing. Returns the time of the newly created event
-    fn step<R: Rng + ?Sized>(&mut self, rng: &mut R, p: &ConsensusParameters) -> f64 {
+    fn step<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+        p: &ConsensusParameters,
+    ) -> f64 {
         if self.next_honest < self.next_adv {
             self.next_honest += p.honest_time(rng);
             self.hon_chain_len += 1;
@@ -66,7 +70,7 @@ impl ConsensusState {
 #[derive(PartialEq)]
 struct TimeIndex(usize, f64);
 
-impl Eq for TimeIndex { }
+impl Eq for TimeIndex {}
 
 impl PartialOrd for TimeIndex {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -91,9 +95,26 @@ struct Experiment {
 }
 
 impl Experiment {
-    fn new<R: Rng + ?Sized>(p: ConsensusParameters, n: usize, granularity: f64, rng: &mut R) -> Self {
-        let states: Vec<_> = (0..n).map(|_| ConsensusState::new(&p, rng)).collect();
-        let queue = states.iter().enumerate().map(|(i, s)| TimeIndex(i, s.next_honest)).chain(states.iter().enumerate().map(|(i, s)| TimeIndex(i, s.next_adv))).map(|i| Reverse(i)).collect();
+    fn new<R: Rng + ?Sized>(
+        p: ConsensusParameters,
+        n: usize,
+        granularity: f64,
+        rng: &mut R,
+    ) -> Self {
+        let states: Vec<_> =
+            (0..n).map(|_| ConsensusState::new(&p, rng)).collect();
+        let queue = states
+            .iter()
+            .enumerate()
+            .map(|(i, s)| TimeIndex(i, s.next_honest))
+            .chain(
+                states
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| TimeIndex(i, s.next_adv)),
+            )
+            .map(|i| Reverse(i))
+            .collect();
         Experiment {
             states: states,
             data: Vec::new(),
@@ -110,17 +131,23 @@ impl Experiment {
         writeln!(&mut f, "#time,probability").unwrap();
         for (t, p) in self.data.iter() {
             writeln!(&mut f, "{},{}", t, p).unwrap();
-        };
+        }
     }
 
     fn step<R: Rng + ?Sized>(&mut self, rng: &mut R) -> f64 {
-        let Reverse(TimeIndex(idx, t)) = self.queue.pop().expect("there is always a next step");
-        let was_winning = self.states[idx].hon_chain_len > self.states[idx].adv_chain_len;
+        let Reverse(TimeIndex(idx, t)) =
+            self.queue.pop().expect("there is always a next step");
+        let was_winning =
+            self.states[idx].hon_chain_len > self.states[idx].adv_chain_len;
         let nxt = self.states[idx].step(rng, &self.params);
         self.queue.push(Reverse(TimeIndex(idx, nxt)));
-        let is_winning = self.states[idx].hon_chain_len > self.states[idx].adv_chain_len;
+        let is_winning =
+            self.states[idx].hon_chain_len > self.states[idx].adv_chain_len;
         while t > self.next_recorded {
-            self.data.push((self.next_recorded, self.nwinning as f64 / self.states.len() as f64));
+            self.data.push((
+                self.next_recorded,
+                self.nwinning as f64 / self.states.len() as f64,
+            ));
             self.next_recorded += self.granularity;
         }
         if !was_winning && is_winning {
@@ -131,19 +158,28 @@ impl Experiment {
         t
     }
 
-    fn run_until_time<R: Rng + ?Sized>(&mut self, end: f64, rng: &mut R) -> &mut Self {
-        while self.step(rng) < end { }
+    fn run_until_time<R: Rng + ?Sized>(
+        &mut self,
+        end: f64,
+        rng: &mut R,
+    ) -> &mut Self {
+        while self.step(rng) < end {}
         self.data.retain(|(t, _)| *t <= end);
         self
     }
 
     /// Runs until a confidence level is reached, or a time limit is hit.
-    fn run_until_confidence<R: Rng + ?Sized>(&mut self, conf: f64, limit: f64, rng: &mut R) -> Option<f64> {
+    fn run_until_confidence<R: Rng + ?Sized>(
+        &mut self,
+        conf: f64,
+        limit: f64,
+        rng: &mut R,
+    ) -> Option<f64> {
         let mut t = 0f64;
-        while self.data.len() == 0 || self.data[self.data.len() - 1].1 < conf { 
+        while self.data.len() == 0 || self.data[self.data.len() - 1].1 < conf {
             t = self.step(rng);
             if t > limit {
-                return None
+                return None;
             }
         }
         Some(t)
@@ -163,8 +199,12 @@ pub fn main() {
         (0.55, 1_000.0, 0.05, rng.core.split()),
         (0.67, 500.0, 0.2, rng.core.split()),
         (0.9, 250.0, 1.0, rng.core.split()),
-    ].into_par_iter().for_each(|(h, len, step, mut rng)| {
-        let network_delays = (0..=10).map(|i| (i as f64 * step, rng.split())).collect::<Vec<_>>();
+    ]
+    .into_par_iter()
+    .for_each(|(h, len, step, mut rng)| {
+        let network_delays = (0..=10)
+            .map(|i| (i as f64 * step, rng.split()))
+            .collect::<Vec<_>>();
         network_delays.into_par_iter().for_each(|(d, rng)| {
             let mut rng = rng.into_rng();
             Experiment::new(
@@ -176,9 +216,9 @@ pub fn main() {
                 500_000,
                 len / 10_000.0,
                 &mut rng,
-            ).run_until_time(len, &mut rng).record(
-                &format!("network_delay_[h={:.2},d={:.2}]", h, d),
-            );
+            )
+            .run_until_time(len, &mut rng)
+            .record(&format!("network_delay_[h={:.2},d={:.2}]", h, d));
             print!(".");
             stdout().flush().unwrap();
         });
@@ -187,24 +227,32 @@ pub fn main() {
     // For each honest fraction, how long a (phase 1) bootstrap is needed to reach 99.9%
     // confidence.
     for d in (0..=4).map(|i| (i as f64 * 0.1)) {
-        let data = (1..50).map(|i| (i, rng.core.split())).collect::<Vec<_>>().into_par_iter().map(|(i, rng)| {
-            let h = 0.5 + (i as f64 * 0.01);
-            let mut rng = rng.into_rng();
-            let res = Experiment::new(
-                 ConsensusParameters {
-                     network_delay: d,
-                     mean_block_time: 1.0,
-                     fraction_honest: h,
-                 },
-                 100_000,
-                 1.0,
-                 &mut rng,
-            ).run_until_confidence(0.999, 15_000.0, &mut rng);
-            print!(".");
-            stdout().flush().unwrap();
-            (h, res)
-        }).collect::<Vec<_>>();
-        let mut f = File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d)).unwrap();
+        let data = (1..50)
+            .map(|i| (i, rng.core.split()))
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(i, rng)| {
+                let h = 0.5 + (i as f64 * 0.01);
+                let mut rng = rng.into_rng();
+                let res = Experiment::new(
+                    ConsensusParameters {
+                        network_delay: d,
+                        mean_block_time: 1.0,
+                        fraction_honest: h,
+                    },
+                    100_000,
+                    1.0,
+                    &mut rng,
+                )
+                .run_until_confidence(0.999, 15_000.0, &mut rng);
+                print!(".");
+                stdout().flush().unwrap();
+                (h, res)
+            })
+            .collect::<Vec<_>>();
+        let mut f =
+            File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d))
+                .unwrap();
         for (h, res) in data.iter() {
             if let Some(res) = res {
                 writeln!(&mut f, "{},{}", h, res).unwrap();
@@ -214,24 +262,32 @@ pub fn main() {
 
     // For each confidence level, how long a (phase 1) bootstrap is needed (with 55% honest)
     for d in (0..=3).map(|i| (i as f64 * 0.1)) {
-        let data = (0..200).map(|i| (i, rng.core.split())).collect::<Vec<_>>().into_par_iter().map(|(i, rng)| {
-            let c = 0.8 + (i as f64 * 0.001);
-            let mut rng = rng.into_rng();
-            let res = Experiment::new(
-                 ConsensusParameters {
-                     network_delay: d,
-                     mean_block_time: 1.0,
-                     fraction_honest: 0.55,
-                 },
-                 100_000,
-                 1.0,
-                 &mut rng,
-            ).run_until_confidence(c, 15_000.0, &mut rng);
-            print!(".");
-            stdout().flush().unwrap();
-            (c, res)
-        }).collect::<Vec<_>>();
-        let mut f = File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d)).unwrap();
+        let data = (0..200)
+            .map(|i| (i, rng.core.split()))
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(i, rng)| {
+                let c = 0.8 + (i as f64 * 0.001);
+                let mut rng = rng.into_rng();
+                let res = Experiment::new(
+                    ConsensusParameters {
+                        network_delay: d,
+                        mean_block_time: 1.0,
+                        fraction_honest: 0.55,
+                    },
+                    100_000,
+                    1.0,
+                    &mut rng,
+                )
+                .run_until_confidence(c, 15_000.0, &mut rng);
+                print!(".");
+                stdout().flush().unwrap();
+                (c, res)
+            })
+            .collect::<Vec<_>>();
+        let mut f =
+            File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d))
+                .unwrap();
         for (h, res) in data.iter() {
             if let Some(res) = res {
                 writeln!(&mut f, "{},{}", h, res).unwrap();
@@ -243,24 +299,35 @@ pub fn main() {
     // confidence)
     for h in [0.55, 0.67, 0.9].iter() {
         for c in [0.99, 0.999].iter() {
-            let data = (1..=250).map(|i| (i, rng.core.split())).collect::<Vec<_>>().into_par_iter().map(|(i, rng)| {
-                let b = i as f64 * 0.1;
-                let mut rng = rng.into_rng();
-                let res = Experiment::new(
-                     ConsensusParameters {
-                         network_delay: 1.0,
-                         mean_block_time: b,
-                         fraction_honest: *h,
-                     },
-                     100_000,
-                     1.0,
-                     &mut rng,
-                ).run_until_confidence(*c, 15_000.0 * b, &mut rng);
-                print!(".");
-                stdout().flush().unwrap();
-                (b, res)
-            }).collect::<Vec<_>>();
-            let mut f = File::create(format!("data/bootstrap_[h={:.2},c={:.3}].csv", h, c)).unwrap();
+            let data =
+                (1..=250)
+                    .map(|i| (i, rng.core.split()))
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|(i, rng)| {
+                        let b = i as f64 * 0.1;
+                        let mut rng = rng.into_rng();
+                        let res = Experiment::new(
+                            ConsensusParameters {
+                                network_delay: 1.0,
+                                mean_block_time: b,
+                                fraction_honest: *h,
+                            },
+                            100_000,
+                            1.0,
+                            &mut rng,
+                        )
+                        .run_until_confidence(*c, 15_000.0 * b, &mut rng);
+                        print!(".");
+                        stdout().flush().unwrap();
+                        (b, res)
+                    })
+                    .collect::<Vec<_>>();
+            let mut f = File::create(format!(
+                "data/bootstrap_[h={:.2},c={:.3}].csv",
+                h, c
+            ))
+            .unwrap();
             for (h, res) in data.iter() {
                 if let Some(res) = res {
                     writeln!(&mut f, "{},{}", h, res).unwrap();

@@ -120,7 +120,11 @@ where
                         }
                     };
                 }
-                (t, min_idx as u16, min_r.expect("at least one sample is generated"))
+                (
+                    t,
+                    min_idx as u16,
+                    min_r.expect("at least one sample is generated"),
+                )
             })
             .collect::<Vec<_>>()
     }
