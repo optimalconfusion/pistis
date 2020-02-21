@@ -79,10 +79,15 @@ set xrange [*:*]
 
 set output 'bootstrap_[c=0.999,b=x].svg'
 set yrange [10:40000]
-plot 'data/bootstrap_[h=0.55,c=0.999].csv' with lines, \
-     'data/bootstrap_[h=0.67,c=0.999].csv' with lines, \
-     'data/bootstrap_[h=0.90,c=0.999].csv' with lines, \
-     'data/bootstrap_[h=0.55,c=0.990].csv' with lines, \
-     'data/bootstrap_[h=0.67,c=0.990].csv' with lines, \
-     'data/bootstrap_[h=0.90,c=0.990].csv' with lines, \
+set title "Length of time required for SRS generation"
+set ylabel "Time to generate SRS (in multiples of delay)"
+set xlabel "Mean time between blocks (in multiples of delay)"
+set mxtics 5
+set grid mxtics mytics xtics ytics
+plot 'data/bootstrap_[h=0.55,c=0.999].csv' with lines title "h=0.55,c=0.999", \
+     'data/bootstrap_[h=0.55,c=0.990].csv' with lines title "h=0.55,c=0.99", \
+     'data/bootstrap_[h=0.67,c=0.999].csv' with lines title "h=0.67,c=0.999", \
+     'data/bootstrap_[h=0.67,c=0.990].csv' with lines title "h=0.67,c=0.99", \
+     'data/bootstrap_[h=0.90,c=0.999].csv' with lines title "h=0.9,c=0.999", \
+     'data/bootstrap_[h=0.90,c=0.990].csv' with lines title "h=0.9,c=0.99", \
 

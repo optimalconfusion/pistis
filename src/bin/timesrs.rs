@@ -5,6 +5,8 @@ use pistis::usrs::*;
 use rand::Rng;
 use sha3::Sha3_256;
 use std::time::Instant;
+use std::io::{Write, stdout};
+use std::fs::{create_dir_all, File};
 
 const DS: &'static [usize] = &[
     0x00_00_10, 0x00_00_20, 0x00_00_40, 0x00_00_80, 0x00_01_00, 0x00_02_00,
@@ -21,24 +23,43 @@ fn main() {
         0xa8, 0x97, 0x34, 0xb9,
     ])
     .into_rng();
-    //// Test plain updates/verifies
-    //for d in DS.iter() {
-    //    let srs = USRS::new(*d).permute(&rng.gen());
-    //    let t0 = Instant::now();
-    //    let upd = Update::<Bls12, Fischlin>::new(&srs, &mut rng);
-    //    println!("P {},{}", d, t0.elapsed().as_millis());
-    //    let t0 = Instant::now();
-    //    assert!(upd.verify(&srs, &mut rng));
-    //    println!("V {},{}", d, t0.elapsed().as_millis());
-    //}
-    // For d=1000, prove and verify update chains up to length 10,000
+    create_dir_all("data").unwrap();
+    let mut prove_data = File::create("data/prove.csv").unwrap();
+    writeln!(&mut prove_data, "#d,runtime (prove(d))").unwrap();
+    let mut verify_data = File::create("data/verify.csv").unwrap();
+    writeln!(&mut prove_data, "#d,runtime (verify(d))").unwrap();
+    let mut agg_data = File::create("data/agg_verify.csv").unwrap();
+    writeln!(&mut prove_data, "#l,runtime (aggregate_verify(l, 2))").unwrap();
+    // Test plain updates/verifies
+    for d in DS.iter() {
+        print!("{}/", d);
+        stdout().flush().unwrap();
+        let srs = USRS::new(*d).permute(&rng.gen());
+        print!("S");
+        stdout().flush().unwrap();
+        let t0 = Instant::now();
+        let upd = Update::<Bls12, Fischlin>::new(&srs, &mut rng);
+        writeln!(&mut prove_data, "{},{}", d, t0.elapsed().as_millis()).unwrap();
+        print!("P");
+        stdout().flush().unwrap();
+        let t0 = Instant::now();
+        assert!(upd.verify(&srs, &mut rng));
+        writeln!(&mut verify_data, "{},{}", d, t0.elapsed().as_millis()).unwrap();
+        println!("V");
+    }
+    // For d=2, prove and verify update chains up to length 10,000
+    let mut agg = AggregateUpdate::<Bls12, Fischlin>::new(2);
     for l in (1..=100).map(|i| i * 100) {
-        let mut agg = AggregateUpdate::<Bls12, Fischlin>::new(2);
-        for _ in 0..l {
+        print!("{}/", l);
+        stdout().flush().unwrap();
+        for _ in 0..100 {
             agg.append(Update::new(agg.as_ref(), &mut rng));
         }
+        print!("S");
+        stdout().flush().unwrap();
         let t0 = Instant::now();
         assert!(agg.verify(&mut rng));
-        println!("AV {},{}", l, t0.elapsed().as_millis());
+        writeln!(&mut agg_data, "{},{}", l, t0.elapsed().as_millis()).unwrap();
+        println!("AV");
     }
 }

@@ -253,6 +253,7 @@ pub fn main() {
         let mut f =
             File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d))
                 .unwrap();
+        writeln!(&mut f, "#honest,boostrap-length").unwrap();
         for (h, res) in data.iter() {
             if let Some(res) = res {
                 writeln!(&mut f, "{},{}", h, res).unwrap();
@@ -288,6 +289,7 @@ pub fn main() {
         let mut f =
             File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d))
                 .unwrap();
+        writeln!(&mut f, "#confidence,bootstrap-length").unwrap();
         for (h, res) in data.iter() {
             if let Some(res) = res {
                 writeln!(&mut f, "{},{}", h, res).unwrap();
@@ -328,6 +330,7 @@ pub fn main() {
                 h, c
             ))
             .unwrap();
+            writeln!(&mut f, "#block-time,bootstrap-length").unwrap();
             for (h, res) in data.iter() {
                 if let Some(res) = res {
                     writeln!(&mut f, "{},{}", h, res).unwrap();
