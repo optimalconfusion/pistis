@@ -9,13 +9,14 @@ use std::io::{Write, stdout};
 use std::fs::{create_dir_all, File};
 
 const DS: &'static [usize] = &[
-    0x00_00_10, 0x00_00_20, 0x00_00_40, 0x00_00_80, 0x00_01_00, 0x00_02_00,
-    0x00_04_00, 0x00_08_00, 0x00_10_00, 0x00_20_00, 0x00_40_00, 0x00_80_00,
-    0x01_00_00, 0x02_00_00, 0x04_00_00, 0x08_00_00, 0x10_00_00,
+    0x00_00_02, 0x00_00_04, 0x00_00_08, 0x00_00_10, 0x00_00_20,
+    0x00_00_40, 0x00_00_80, 0x00_01_00, 0x00_02_00, 0x00_04_00, 0x00_08_00,
+    0x00_10_00, 0x00_20_00, 0x00_40_00, 0x00_80_00, 0x01_00_00, 0x02_00_00,
+    0x04_00_00, 0x08_00_00, 0x10_00_00,
 ];
 
 type Fischlin =
-    FischlinTransform<DualProofOfExponentSigmaProtocol<G1Affine, Sha3_256>>;
+    FischlinTransform<DualProofOfExponentSigmaProtocol<G1Affine>, Sha3_256>;
 
 fn main() {
     let mut rng = Sha3_256::query(&[

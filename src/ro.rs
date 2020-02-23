@@ -3,6 +3,10 @@ use rand_core::{CryptoRng, SeedableRng};
 use sha3::{Digest, Sha3_256};
 use std::marker::PhantomData;
 
+/// A random oracle's output
+///
+/// This implements a block random number generator, by feeding back into the original random
+/// oracle.
 pub struct ROOutput<H: RO + ?Sized> {
     raw: H::RawOutput,
     ctr: usize,
@@ -10,6 +14,7 @@ pub struct ROOutput<H: RO + ?Sized> {
 }
 
 impl<H: RO + ?Sized> ROOutput<H> {
+    /// Create a new output given raw output bits.
     pub fn new(raw: H::RawOutput) -> Self {
         ROOutput {
             raw: raw,
@@ -18,6 +23,7 @@ impl<H: RO + ?Sized> ROOutput<H> {
         }
     }
 
+    /// Split off a separate output using the original random oracle.
     pub fn split(&mut self) -> Self {
         let mut res = H::BlockOutput::default();
         self.generate(&mut res);
@@ -34,10 +40,12 @@ impl<H: RO + ?Sized> ROOutput<H> {
         }
     }
 
+    /// Retrieve the corresponding raw output
     pub fn raw(self) -> H::RawOutput {
         self.raw
     }
 
+    /// Converts this output into a full RNG using domain-separation on the original random oracle.
     pub fn into_rng(self) -> BlockRng<Self> {
         BlockRng::new(self)
     }
@@ -48,12 +56,14 @@ impl<H: RO + ?Sized> BlockRngCore for ROOutput<H> {
     type Results = H::BlockOutput;
 
     fn generate(&mut self, results: &mut Self::Results) {
+        // Make RO query
         let outp =
             H::seq_query(&[self.raw.as_ref(), &self.ctr.to_le_bytes()[..]][..])
                 .raw();
         let mut iter = outp.as_ref().iter();
         self.ctr += 1;
         *results = Self::Results::default();
+        // Populate the u32 results vector
         for i in 0..results.as_ref().len() {
             let mut nxt = [0; 4];
             for i in 0..4 {
@@ -76,12 +86,17 @@ impl<H: RO + ?Sized> SeedableRng for ROOutput<H> {
 
 impl<H: RO + ?Sized> CryptoRng for ROOutput<H> {}
 
+/// A random oracle.
 pub trait RO {
+    /// The output of the random oracle
     type RawOutput: AsRef<[u8]> + AsMut<[u8]> + Default;
+    /// The output, for `BlockRngCore`.
     type BlockOutput: AsRef<[u32]> + AsMut<[u32]> + Default;
 
+    /// Makes a simple query.
     fn query(i: &[u8]) -> ROOutput<Self>;
 
+    /// Makes a query of sequences of sequences. Often simpler to call in practice.
     fn seq_query(i: &[&[u8]]) -> ROOutput<Self> {
         let mut vec = Vec::new();
         for inp in i.iter() {

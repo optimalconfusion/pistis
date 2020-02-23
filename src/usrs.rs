@@ -11,6 +11,7 @@ use rayon::iter::once;
 use rayon::prelude::*;
 use std::io::{self, Write};
 
+/// `try!` replacement for boolean conditions.
 macro_rules! check {
     ($x:expr) => {{
         if !$x {
@@ -20,6 +21,7 @@ macro_rules! check {
 }
 
 #[derive(Clone)]
+/// An updatable structured reference string for the Sonic protocol.
 pub struct USRS<E: Engine> {
     /// The dimension of the USRS.
     pub d: usize,
@@ -33,8 +35,11 @@ pub struct USRS<E: Engine> {
     pub h_ax: Vec<E::G2Affine>,
 }
 
+/// A trapdoor (or trapdoor permutation) for Sonic's reference string.
 pub struct Trapdoor<E: Engine> {
+    /// The exponent x.
     pub x: E::Fr,
+    /// The exponent alpha.
     pub alpha: E::Fr,
 }
 
@@ -47,19 +52,25 @@ impl<E: Engine> Distribution<Trapdoor<E>> for Standard {
     }
 }
 
+/// An update proof over Sonic's reference string.
 pub struct Update<
     E: Engine,
     N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>,
 > {
+    /// The final SRS.
     srs: USRS<E>,
+    /// g^y, where y is the update x-permutation.
     g_y: E::G1Affine,
+    /// g^{beta * y}, where beta is the update alpha-permutation.
     g_by: E::G1Affine,
+    /// The proof of knowledge of exponent for g^y and g^{beta * y}.
     pi: N::Proof,
 }
 
 impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
+    /// Creates a randomly sampled update to a SRS.
     pub fn new<H: RO + ?Sized>(
         srs: &USRS<E>,
         rng: &mut BlockRng<ROOutput<H>>,
@@ -85,6 +96,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
         }
     }
 
+    /// Verify the SRS update.
     pub fn verify<R: Rng + ?Sized>(&self, srs: &USRS<E>, rng: &mut R) -> bool {
         let d = srs.d;
         let g = E::G1Affine::one();
@@ -107,6 +119,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     }
 }
 
+/// A single element in an aggregate update
 pub struct UpdatePart<
     E: Engine,
     N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>,
@@ -118,11 +131,14 @@ pub struct UpdatePart<
     pi: N::Proof,
 }
 
+/// A series of SRS updates from an initial empty SRS.
 pub struct AggregateUpdate<
     E: Engine,
     N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>,
 > {
+    /// The final SRS.
     srs: USRS<E>,
+    /// The series of update parts.
     upds: Vec<UpdatePart<E, N>>,
 }
 
@@ -131,6 +147,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
 where
     UpdatePart<E, N>: Send + Sync,
 {
+    /// Creates an empty SRS update.
     pub fn new(d: usize) -> Self {
         AggregateUpdate {
             srs: USRS::new(d),
@@ -138,6 +155,7 @@ where
         }
     }
 
+    /// Adds a new update to the end of the aggregate list.
     pub fn append(&mut self, upd: Update<E, N>) {
         let nxt = UpdatePart {
             h_x: self.srs.h_x[self.srs.d + 1],
@@ -150,6 +168,7 @@ where
         self.upds.push(nxt);
     }
 
+    /// Verifies the series of updates.
     pub fn verify<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
@@ -182,11 +201,13 @@ where
             vec![<E as ScalarEngine>::Fr::random(rng); 2 * self.upds.len()];
         let mut neg_g = g;
         neg_g.negate();
+        // rhs = e(g, \sum_i h^{x_{i+1}r_i)
         let rhs = E::final_exponentiation(&E::miller_loop(&[(
             &g.prepare(),
             &multiexp(h_xys.iter(), rnd.iter()).into_affine().prepare(),
         )]))
         .unwrap();
+        // lhs = \prod_i e(g^{x_i, r_i}, h^{x_i})
         let lhs = g_ys
             .zip(h_xs)
             .zip(rnd)
@@ -218,7 +239,9 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
 }
 
 impl<E: Engine> USRS<E> {
+    /// Initialises an empty SRS.
     pub fn new(d: usize) -> Self {
+        assert!(d >= 2);
         USRS {
             d: d,
             g_x: vec![E::G1Affine::one(); 2 * d + 1],
@@ -228,6 +251,7 @@ impl<E: Engine> USRS<E> {
         }
     }
 
+    /// Exports the SRS to a file.
     pub fn export<W: Write>(&self, mut out: W) -> io::Result<()> {
         out.write_all((self.d as u64).to_le_bytes().as_ref())?;
         for g in self.g_x.iter().chain(self.g_ax.iter()) {
@@ -239,6 +263,7 @@ impl<E: Engine> USRS<E> {
         Ok(())
     }
 
+    /// Verifies the SRS structure.
     pub fn verify_structure<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
@@ -307,6 +332,7 @@ impl<E: Engine> USRS<E> {
         E::final_exponentiation(&lp).unwrap() == E::Fqk::one()
     }
 
+    /// Apply a trapdoor permutation to this SRS.
     pub fn permute(&self, trapdoor: &Trapdoor<E>) -> Self {
         let mut srs = self.clone();
         // beta y^i

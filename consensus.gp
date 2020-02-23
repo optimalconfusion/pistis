@@ -91,3 +91,20 @@ plot 'data/bootstrap_[h=0.55,c=0.999].csv' with lines title "h=0.55,c=0.999", \
      'data/bootstrap_[h=0.90,c=0.999].csv' with lines title "h=0.9,c=0.999", \
      'data/bootstrap_[h=0.90,c=0.990].csv' with lines title "h=0.9,c=0.99", \
 
+set title
+set xlabel
+set ylabel
+set xrange [*:*]
+set yrange [*:*]
+
+set output 'prove.svg'
+set logscale xy 2
+plot 'data/prove.csv' with lines
+
+set output 'verify.svg'
+set logscale xy 2
+plot 'data/verify.csv' with lines
+
+set output 'agg_verify.svg'
+unset logscale xy
+plot 'data/agg_verify.csv' using 1:($2/1000) with lines
