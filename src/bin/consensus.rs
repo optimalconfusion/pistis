@@ -1,4 +1,4 @@
-use pistis::ro::RO;
+use pistis::ro::{RO, SplittableRng};
 use rand::distributions::Distribution;
 use rand::Rng;
 use rand_distr::Exp;
@@ -195,18 +195,17 @@ pub fn main() {
     create_dir_all("data").unwrap();
     // Network delays, ranging from 0 to 0.5 in 0.1 increments
     vec![
-        (0.51, 10_000.0, 0.01, rng.core.split()),
-        (0.55, 1_000.0, 0.05, rng.core.split()),
-        (0.67, 500.0, 0.2, rng.core.split()),
-        (0.9, 250.0, 1.0, rng.core.split()),
+        (0.51, 10_000.0, 0.01, rng.split()),
+        (0.55, 1_000.0, 0.05, rng.split()),
+        (0.67, 500.0, 0.2, rng.split()),
+        (0.9, 250.0, 1.0, rng.split()),
     ]
     .into_par_iter()
     .for_each(|(h, len, step, mut rng)| {
         let network_delays = (0..=10)
             .map(|i| (i as f64 * step, rng.split()))
             .collect::<Vec<_>>();
-        network_delays.into_par_iter().for_each(|(d, rng)| {
-            let mut rng = rng.into_rng();
+        network_delays.into_par_iter().for_each(|(d, mut rng)| {
             Experiment::new(
                 ConsensusParameters {
                     network_delay: d,
@@ -228,12 +227,11 @@ pub fn main() {
     // confidence.
     for d in (0..=4).map(|i| (i as f64 * 0.1)) {
         let data = (1..50)
-            .map(|i| (i, rng.core.split()))
+            .map(|i| (i, rng.split()))
             .collect::<Vec<_>>()
             .into_par_iter()
-            .map(|(i, rng)| {
+            .map(|(i, mut rng)| {
                 let h = 0.5 + (i as f64 * 0.01);
-                let mut rng = rng.into_rng();
                 let res = Experiment::new(
                     ConsensusParameters {
                         network_delay: d,
@@ -264,12 +262,11 @@ pub fn main() {
     // For each confidence level, how long a (phase 1) bootstrap is needed (with 55% honest)
     for d in (0..=3).map(|i| (i as f64 * 0.1)) {
         let data = (0..200)
-            .map(|i| (i, rng.core.split()))
+            .map(|i| (i, rng.split()))
             .collect::<Vec<_>>()
             .into_par_iter()
-            .map(|(i, rng)| {
+            .map(|(i, mut rng)| {
                 let c = 0.8 + (i as f64 * 0.001);
-                let mut rng = rng.into_rng();
                 let res = Experiment::new(
                     ConsensusParameters {
                         network_delay: d,
@@ -303,12 +300,11 @@ pub fn main() {
         for c in [0.99, 0.999].iter() {
             let data =
                 (1..=250)
-                    .map(|i| (i, rng.core.split()))
+                    .map(|i| (i, rng.split()))
                     .collect::<Vec<_>>()
                     .into_par_iter()
-                    .map(|(i, rng)| {
+                    .map(|(i, mut rng)| {
                         let b = i as f64 * 0.1;
-                        let mut rng = rng.into_rng();
                         let res = Experiment::new(
                             ConsensusParameters {
                                 network_delay: 1.0,

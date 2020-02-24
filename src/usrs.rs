@@ -1,12 +1,11 @@
 use crate::poe::{CurvePair, FieldPair, NIZK};
-use crate::ro::{ROOutput, RO};
+use crate::ro::SplittableRng;
 use crate::util::multiexp;
 use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
-use rand_core::block::BlockRng;
 use rayon::iter::once;
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -71,12 +70,12 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
     /// Creates a randomly sampled update to a SRS.
-    pub fn new<H: RO + ?Sized>(
+    pub fn new<R: SplittableRng>(
         srs: &USRS<E>,
-        rng: &mut BlockRng<ROOutput<H>>,
+        rng: &mut R,
     ) -> Self
     where
-        ROOutput<H>: Send,
+        R: Send,
     {
         let trapdoor: Trapdoor<E> = rng.gen();
         let mut tmp = E::G1Affine::one().mul(trapdoor.x);
@@ -92,7 +91,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
             srs: srs.permute(&trapdoor),
             g_y: g_y,
             g_by: g_by,
-            pi: N::prove(CurvePair(g_y, g_by), FieldPair(trapdoor.x, by), rng),
+            pi: N::prove(&CurvePair::new(g_y, g_by), &FieldPair::new(trapdoor.x, by), rng),
         }
     }
 
@@ -103,7 +102,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
         let e = E::pairing;
         check!(self.g_y != g && self.g_by != g);
         check!(self.srs.d == srs.d);
-        check!(N::verify(CurvePair(self.g_y, self.g_by), &self.pi));
+        check!(N::verify(&CurvePair::new(self.g_y, self.g_by), &self.pi));
         check!(e(self.g_by, srs.h_ax[d + 1]) == e(g, self.srs.h_ax[d + 1]));
         check!(e(self.g_y, srs.h_x[d + 1]) == e(g, self.srs.h_x[d + 1]));
         check!(self.srs.verify_structure(rng));
@@ -176,7 +175,7 @@ where
         check!(self
             .upds
             .par_iter()
-            .all(|u| N::verify(CurvePair(u.g_y, u.g_by), &u.pi)));
+            .all(|u| N::verify(&CurvePair::new(u.g_y, u.g_by), &u.pi)));
         check!(self.upds.par_iter().all(|u| u.g_y != g && u.g_by != g));
         check!(self.upds[0].h_x == h);
         check!(self.upds[0].h_ax == h);

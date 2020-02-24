@@ -1,7 +1,30 @@
 use rand_core::block::{BlockRng, BlockRngCore};
 use rand_core::{CryptoRng, SeedableRng};
+use rand::Rng;
 use sha3::{Digest, Sha3_256};
 use std::marker::PhantomData;
+
+pub trait SplittableRng: Rng {
+    fn split(&mut self) -> Self;
+}
+
+impl<H: RO + ?Sized> SplittableRng for BlockRng<ROOutput<H>> {
+    fn split(&mut self) -> Self {
+        let mut res = H::BlockOutput::default();
+        self.core.generate(&mut res);
+        let mut seed = H::RawOutput::default();
+        for (i, w) in res.as_ref().iter().enumerate() {
+            for j in 0..4 {
+                seed.as_mut()[4 * i + j] = ((*w >> (32 - 8 * j)) & 0xff) as u8;
+            }
+        }
+        BlockRng::new(ROOutput {
+            raw: seed,
+            ctr: 0,
+            phantom: PhantomData,
+        })
+    }
+}
 
 /// A random oracle's output
 ///
@@ -18,23 +41,6 @@ impl<H: RO + ?Sized> ROOutput<H> {
     pub fn new(raw: H::RawOutput) -> Self {
         ROOutput {
             raw: raw,
-            ctr: 0,
-            phantom: PhantomData,
-        }
-    }
-
-    /// Split off a separate output using the original random oracle.
-    pub fn split(&mut self) -> Self {
-        let mut res = H::BlockOutput::default();
-        self.generate(&mut res);
-        let mut seed = H::RawOutput::default();
-        for (i, w) in res.as_ref().iter().enumerate() {
-            for j in 0..4 {
-                seed.as_mut()[4 * i + j] = ((*w >> (32 - 8 * j)) & 0xff) as u8;
-            }
-        }
-        ROOutput {
-            raw: seed,
             ctr: 0,
             phantom: PhantomData,
         }
