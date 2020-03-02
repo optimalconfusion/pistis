@@ -8,7 +8,7 @@ use std::collections::BinaryHeap;
 use std::fs::{create_dir_all, File};
 use std::io::{stdout, Write};
 
-const BASE_ITER: usize = 1_000_000;
+const BASE_ITER: usize = 1_000;
 
 fn rng() -> SmallRng {
     SmallRng::from_seed(thread_rng().gen())
@@ -135,7 +135,7 @@ impl Experiment {
             .collect();
         Experiment {
             states: states,
-            data: Vec::new(),
+            data: vec![(0f64, 0f64)],
             params: p,
             nwinning: 0,
             queue: queue,
@@ -186,6 +186,19 @@ impl Experiment {
         self
     }
 
+    /// Returns the first recorded point (if any) which satisfies the given confidence level.
+    fn conf(&self, conf: f64) -> Option<f64> {
+        let pos = match self.data.binary_search_by(|(_, y)| y.partial_cmp(&conf).expect("Probabilities must be comparable")) {
+            Ok(p) => p,
+            Err(p) => p,
+        };
+        if pos == self.data.len() {
+            None
+        } else {
+            Some(self.data[pos].0)
+        }
+    }
+
     /// Runs until a confidence level is reached, or a time limit is hit.
     fn run_until_confidence<R: Rng + ?Sized>(
         &mut self,
@@ -229,105 +242,42 @@ pub fn main() {
         });
     });
 
-    //// For each honest fraction, how long a (phase 1) bootstrap is needed to reach 99.9%
-    //// confidence.
-    //for d in (0..=4).map(|i| (i as f64 * 0.1)) {
-    //    let data = (1..50)
-    //        .into_par_iter()
-    //        .map(|i| {
-    //            let h = 0.5 + (i as f64 * 0.01);
-    //            let res = Experiment::new(
-    //                ConsensusParameters {
-    //                    network_delay: d,
-    //                    mean_block_time: 1.0,
-    //                    fraction_honest: h,
-    //                },
-    //                BASE_ITER,
-    //                1.0,
-    //                &mut rng(),
-    //            )
-    //            .run_until_confidence(0.999, 15_000.0, &mut rng());
-    //            print!(".");
-    //            stdout().flush().unwrap();
-    //            (h, res)
-    //        })
-    //        .collect::<Vec<_>>();
-    //    let mut f =
-    //        File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d))
-    //            .unwrap();
-    //    writeln!(&mut f, "#honest,boostrap-length").unwrap();
-    //    for (h, res) in data.iter() {
-    //        if let Some(res) = res {
-    //            writeln!(&mut f, "{},{}", h, res).unwrap();
-    //        }
-    //    }
-    //}
-
-    //// For each confidence level, how long a (phase 1) bootstrap is needed (with 55% honest)
-    //for d in (0..=3).map(|i| (i as f64 * 0.1)) {
-    //    let data = (0..200)
-    //        .into_par_iter()
-    //        .map(|i| {
-    //            let c = 0.8 + (i as f64 * 0.001);
-    //            let res = Experiment::new(
-    //                ConsensusParameters {
-    //                    network_delay: d,
-    //                    mean_block_time: 1.0,
-    //                    fraction_honest: 0.55,
-    //                },
-    //                BASE_ITER,
-    //                1.0,
-    //                &mut rng(),
-    //            )
-    //            .run_until_confidence(c, 15_000.0, &mut rng());
-    //            print!(".");
-    //            stdout().flush().unwrap();
-    //            (c, res)
-    //        })
-    //        .collect::<Vec<_>>();
-    //    let mut f =
-    //        File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d))
-    //            .unwrap();
-    //    writeln!(&mut f, "#confidence,bootstrap-length").unwrap();
-    //    for (h, res) in data.iter() {
-    //        if let Some(res) = res {
-    //            writeln!(&mut f, "{},{}", h, res).unwrap();
-    //        }
-    //    }
-    //}
-
     // For each inter-block time, how long a (phase 1) bootstrap is needed (with 55% honest, 99.9%
     // confidence)
-    for h in [0.55, 0.60, 0.70, 0.9].iter() {
-        for c in [0.999, 0.9999, 0.99999].iter() {
-            let data =
-                (1..=250)
-                    .into_par_iter()
-                    .map(|i| {
-                        let b = i as f64 * 0.1;
-                        let res = Experiment::new(
-                            ConsensusParameters::new(1.0, b, *h, &mut rng()),
-                            BASE_ITER,
-                            1.0,
-                            &mut rng(),
-                        )
-                        .run_until_confidence(*c, 15_000.0 * b, &mut rng());
-                        print!(".");
-                        stdout().flush().unwrap();
-                        (b, res)
-                    })
+    [0.55, 0.67, 0.9].par_iter().for_each(|h| {
+        //for c in [0.999, 0.9999, 0.99999].iter() {
+        let confs = [0.999, 0.9999, 0.99999];
+        let data =
+            (1..=250)
+                .into_par_iter()
+                .map(|i| {
+                    let b = i as f64 * 0.1;
+                    let mut exp = Experiment::new(
+                        ConsensusParameters::new(1.0, b, *h, &mut rng()),
+                        BASE_ITER,
+                        1.0,
+                        &mut rng(),
+                    );
+                    stdout().flush().unwrap();
+                    exp.run_until_confidence(confs[confs.len() - 1], 15_000.0 * b, &mut rng());
+                    print!(".");
+                    stdout().flush().unwrap();
+                    (b, confs.iter().map(|c| exp.conf(*c)).collect::<Vec<_>>())
+                })
                     .collect::<Vec<_>>();
-            let mut f = File::create(format!(
+            let mut fs = confs.iter().map(|c| File::create(format!(
                 "data/bootstrap_[h={:.2},c={:.5}].csv",
                 h, c
-            ))
-            .unwrap();
-            writeln!(&mut f, "#block-time,bootstrap-length").unwrap();
-            for (h, res) in data.iter() {
+            )).unwrap()).collect::<Vec<_>>();
+            for f in fs.iter_mut() {
+                writeln!(f, "#block-time,bootstrap-length").unwrap();
+            }
+            for (b, res) in data.into_iter() {
+                for (res, f) in res.into_iter().zip(fs.iter_mut()) {
                 if let Some(res) = res {
-                    writeln!(&mut f, "{},{}", h, res).unwrap();
+                    writeln!(f, "{},{}", b, res).unwrap();
                 }
             }
         }
-    }
+    });
 }
