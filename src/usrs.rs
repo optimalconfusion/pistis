@@ -171,6 +171,11 @@ where
     pub fn verify<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
+        if self.upds.len() == 0 {
+            check!(self.srs.h_x.iter().chain(self.srs.h_ax.iter()).all(|h_x| h_x == &h));
+            check!(self.srs.g_x.iter().chain(self.srs.g_ax.iter()).all(|g_x| g_x == &g));
+            return true;
+        }
         let e = E::pairing;
         check!(self
             .upds

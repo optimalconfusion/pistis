@@ -1,33 +1,51 @@
-use pistis::ro::{RO, SplittableRng};
 use rand::distributions::Distribution;
-use rand::Rng;
+use rand::rngs::SmallRng;
+use rand::{Rng, thread_rng, SeedableRng};
 use rand_distr::Exp;
 use rayon::prelude::*;
-use sha3::Sha3_256;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::fs::{create_dir_all, File};
 use std::io::{stdout, Write};
 
-#[derive(Copy, Clone)]
-pub struct ConsensusParameters {
-    pub network_delay: f64,
-    pub mean_block_time: f64,
-    pub fraction_honest: f64,
+const BASE_ITER: usize = 1_000_000;
+
+fn rng() -> SmallRng {
+    SmallRng::from_seed(thread_rng().gen())
+}
+
+const PRESAMPLE_BITS: usize = 20;
+
+struct ConsensusParameters {
+    honest_presample: Vec<f64>,
+    adv_presample: Vec<f64>,
 }
 
 impl ConsensusParameters {
+    fn new<R: Rng + ?Sized>(network_delay: f64, mean_block_time: f64, fraction_honest: f64, rng: &mut R) -> Self {
+        let mut honest_presample = Vec::with_capacity(1 << PRESAMPLE_BITS);
+        let mut adv_presample = Vec::with_capacity(1 << PRESAMPLE_BITS);
+        for _ in 0..(1 << PRESAMPLE_BITS) {
+            honest_presample.push(Exp::new(fraction_honest / mean_block_time)
+                .unwrap()
+                .sample(rng)
+                + network_delay);
+            adv_presample.push(Exp::new((1f64 - fraction_honest) / mean_block_time)
+                .unwrap()
+                .sample(rng));
+        }
+        ConsensusParameters {
+            honest_presample,
+            adv_presample,
+        }
+    }
+
     fn honest_time<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        Exp::new(self.fraction_honest / self.mean_block_time)
-            .unwrap()
-            .sample(rng)
-            + self.network_delay
+        self.honest_presample[rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
     }
 
     fn adversarial_time<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        Exp::new((1f64 - self.fraction_honest) / self.mean_block_time)
-            .unwrap()
-            .sample(rng)
+        self.adv_presample[rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
     }
 }
 
@@ -187,142 +205,120 @@ impl Experiment {
 }
 
 pub fn main() {
-    let mut rng = Sha3_256::query(&[
-        0xa0, 0xc3, 0x5b, 0xa6, 0x8a, 0x0d, 0x98, 0x45, 0x61, 0x32, 0x70, 0xc3,
-        0x6a, 0x0f, 0xa3, 0x50,
-    ])
-    .into_rng();
     create_dir_all("data").unwrap();
     // Network delays, ranging from 0 to 0.5 in 0.1 increments
     vec![
-        (0.51, 10_000.0, 0.01, rng.split()),
-        (0.55, 1_000.0, 0.05, rng.split()),
-        (0.67, 500.0, 0.2, rng.split()),
-        (0.9, 250.0, 1.0, rng.split()),
+        (0.51, 10_000.0, 0.01),
+        (0.55, 1_000.0, 0.05),
+        (0.67, 500.0, 0.2),
+        (0.9, 250.0, 1.0),
     ]
     .into_par_iter()
-    .for_each(|(h, len, step, mut rng)| {
-        let network_delays = (0..=10)
-            .map(|i| (i as f64 * step, rng.split()))
-            .collect::<Vec<_>>();
-        network_delays.into_par_iter().for_each(|(d, mut rng)| {
+    .for_each(|(h, len, step)| {
+        (0..=10).into_par_iter().map(|i| (i as f64 * step)).for_each(|d| {
             Experiment::new(
-                ConsensusParameters {
-                    network_delay: d,
-                    mean_block_time: 1.0,
-                    fraction_honest: h,
-                },
-                500_000,
-                len / 10_000.0,
-                &mut rng,
+                ConsensusParameters::new(d, 1.0, h, &mut rng()),
+                5 * BASE_ITER,
+                2.0,
+                &mut rng(),
             )
-            .run_until_time(len, &mut rng)
+            .run_until_time(len, &mut rng())
             .record(&format!("network_delay_[h={:.2},d={:.2}]", h, d));
             print!(".");
             stdout().flush().unwrap();
         });
     });
 
-    // For each honest fraction, how long a (phase 1) bootstrap is needed to reach 99.9%
-    // confidence.
-    for d in (0..=4).map(|i| (i as f64 * 0.1)) {
-        let data = (1..50)
-            .map(|i| (i, rng.split()))
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|(i, mut rng)| {
-                let h = 0.5 + (i as f64 * 0.01);
-                let res = Experiment::new(
-                    ConsensusParameters {
-                        network_delay: d,
-                        mean_block_time: 1.0,
-                        fraction_honest: h,
-                    },
-                    100_000,
-                    1.0,
-                    &mut rng,
-                )
-                .run_until_confidence(0.999, 15_000.0, &mut rng);
-                print!(".");
-                stdout().flush().unwrap();
-                (h, res)
-            })
-            .collect::<Vec<_>>();
-        let mut f =
-            File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d))
-                .unwrap();
-        writeln!(&mut f, "#honest,boostrap-length").unwrap();
-        for (h, res) in data.iter() {
-            if let Some(res) = res {
-                writeln!(&mut f, "{},{}", h, res).unwrap();
-            }
-        }
-    }
+    //// For each honest fraction, how long a (phase 1) bootstrap is needed to reach 99.9%
+    //// confidence.
+    //for d in (0..=4).map(|i| (i as f64 * 0.1)) {
+    //    let data = (1..50)
+    //        .into_par_iter()
+    //        .map(|i| {
+    //            let h = 0.5 + (i as f64 * 0.01);
+    //            let res = Experiment::new(
+    //                ConsensusParameters {
+    //                    network_delay: d,
+    //                    mean_block_time: 1.0,
+    //                    fraction_honest: h,
+    //                },
+    //                BASE_ITER,
+    //                1.0,
+    //                &mut rng(),
+    //            )
+    //            .run_until_confidence(0.999, 15_000.0, &mut rng());
+    //            print!(".");
+    //            stdout().flush().unwrap();
+    //            (h, res)
+    //        })
+    //        .collect::<Vec<_>>();
+    //    let mut f =
+    //        File::create(format!("data/bootstrap_[c=0.999,d={:.1}].csv", d))
+    //            .unwrap();
+    //    writeln!(&mut f, "#honest,boostrap-length").unwrap();
+    //    for (h, res) in data.iter() {
+    //        if let Some(res) = res {
+    //            writeln!(&mut f, "{},{}", h, res).unwrap();
+    //        }
+    //    }
+    //}
 
-    // For each confidence level, how long a (phase 1) bootstrap is needed (with 55% honest)
-    for d in (0..=3).map(|i| (i as f64 * 0.1)) {
-        let data = (0..200)
-            .map(|i| (i, rng.split()))
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|(i, mut rng)| {
-                let c = 0.8 + (i as f64 * 0.001);
-                let res = Experiment::new(
-                    ConsensusParameters {
-                        network_delay: d,
-                        mean_block_time: 1.0,
-                        fraction_honest: 0.55,
-                    },
-                    100_000,
-                    1.0,
-                    &mut rng,
-                )
-                .run_until_confidence(c, 15_000.0, &mut rng);
-                print!(".");
-                stdout().flush().unwrap();
-                (c, res)
-            })
-            .collect::<Vec<_>>();
-        let mut f =
-            File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d))
-                .unwrap();
-        writeln!(&mut f, "#confidence,bootstrap-length").unwrap();
-        for (h, res) in data.iter() {
-            if let Some(res) = res {
-                writeln!(&mut f, "{},{}", h, res).unwrap();
-            }
-        }
-    }
+    //// For each confidence level, how long a (phase 1) bootstrap is needed (with 55% honest)
+    //for d in (0..=3).map(|i| (i as f64 * 0.1)) {
+    //    let data = (0..200)
+    //        .into_par_iter()
+    //        .map(|i| {
+    //            let c = 0.8 + (i as f64 * 0.001);
+    //            let res = Experiment::new(
+    //                ConsensusParameters {
+    //                    network_delay: d,
+    //                    mean_block_time: 1.0,
+    //                    fraction_honest: 0.55,
+    //                },
+    //                BASE_ITER,
+    //                1.0,
+    //                &mut rng(),
+    //            )
+    //            .run_until_confidence(c, 15_000.0, &mut rng());
+    //            print!(".");
+    //            stdout().flush().unwrap();
+    //            (c, res)
+    //        })
+    //        .collect::<Vec<_>>();
+    //    let mut f =
+    //        File::create(format!("data/bootstrap_[h=0.55,d={:.1}].csv", d))
+    //            .unwrap();
+    //    writeln!(&mut f, "#confidence,bootstrap-length").unwrap();
+    //    for (h, res) in data.iter() {
+    //        if let Some(res) = res {
+    //            writeln!(&mut f, "{},{}", h, res).unwrap();
+    //        }
+    //    }
+    //}
 
     // For each inter-block time, how long a (phase 1) bootstrap is needed (with 55% honest, 99.9%
     // confidence)
-    for h in [0.55, 0.67, 0.9].iter() {
-        for c in [0.99, 0.999].iter() {
+    for h in [0.55, 0.60, 0.70, 0.9].iter() {
+        for c in [0.999, 0.9999, 0.99999].iter() {
             let data =
                 (1..=250)
-                    .map(|i| (i, rng.split()))
-                    .collect::<Vec<_>>()
                     .into_par_iter()
-                    .map(|(i, mut rng)| {
+                    .map(|i| {
                         let b = i as f64 * 0.1;
                         let res = Experiment::new(
-                            ConsensusParameters {
-                                network_delay: 1.0,
-                                mean_block_time: b,
-                                fraction_honest: *h,
-                            },
-                            100_000,
+                            ConsensusParameters::new(1.0, b, *h, &mut rng()),
+                            BASE_ITER,
                             1.0,
-                            &mut rng,
+                            &mut rng(),
                         )
-                        .run_until_confidence(*c, 15_000.0 * b, &mut rng);
+                        .run_until_confidence(*c, 15_000.0 * b, &mut rng());
                         print!(".");
                         stdout().flush().unwrap();
                         (b, res)
                     })
                     .collect::<Vec<_>>();
             let mut f = File::create(format!(
-                "data/bootstrap_[h={:.2},c={:.3}].csv",
+                "data/bootstrap_[h={:.2},c={:.5}].csv",
                 h, c
             ))
             .unwrap();
