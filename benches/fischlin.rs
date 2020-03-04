@@ -12,8 +12,8 @@ use pistis::ro::RO;
 use sha3::Sha3_256;
 
 type Fischlin<C> =
-    FischlinTransform<DualProofOfExponentSigmaProtocol<C, Sha3_256>>;
-type Sigma<C> = DualProofOfExponentSigmaProtocol<C, Sha3_256>;
+    FischlinTransform<DualProofOfExponentSigmaProtocol<C>, Sha3_256>;
+type FiatShamir<C> = FiatShamirTransform<DualProofOfExponentSigmaProtocol<C>, Sha3_256>;
 
 fn bench_prove<
     C: CurveAffine,
@@ -31,15 +31,15 @@ fn bench_prove<
             let (a, b) =
                 (C::Scalar::random(&mut rng), C::Scalar::random(&mut rng));
             (
-                CurvePair(
+                CurvePair::new(
                     C::one().mul(a).into_affine(),
                     C::one().mul(b).into_affine(),
                 ),
-                FieldPair(a, b),
+                FieldPair::new(a, b),
                 rng,
             )
         },
-        |(x, w, mut rng)| N::prove(x, w, &mut rng),
+        |(x, w, mut rng)| N::prove(&x, &w, &mut rng),
         BatchSize::SmallInput,
     );
 }
@@ -49,10 +49,10 @@ fn bench_prove_all(c: &mut Criterion) {
     fischlin.bench_function("G1", bench_prove::<G1Affine, Fischlin<G1Affine>>);
     fischlin.bench_function("G2", bench_prove::<G2Affine, Fischlin<G2Affine>>);
     fischlin.finish();
-    let mut sigma = c.benchmark_group("prove Sigma");
-    sigma.bench_function("G1", bench_prove::<G1Affine, Sigma<G1Affine>>);
-    sigma.bench_function("G2", bench_prove::<G2Affine, Sigma<G2Affine>>);
-    sigma.finish();
+    let mut fiatshamir = c.benchmark_group("prove Fiat-Shamir");
+    fiatshamir.bench_function("G1", bench_prove::<G1Affine, FiatShamir<G1Affine>>);
+    fiatshamir.bench_function("G2", bench_prove::<G2Affine, FiatShamir<G2Affine>>);
+    fiatshamir.finish();
 }
 
 fn bench_verify<
@@ -71,15 +71,16 @@ fn bench_verify<
             let (a, b) =
                 (C::Scalar::random(&mut rng), C::Scalar::random(&mut rng));
             let (x, w) = (
-                CurvePair(
+                CurvePair::new(
                     C::one().mul(a).into_affine(),
                     C::one().mul(b).into_affine(),
                 ),
-                FieldPair(a, b),
+                FieldPair::new(a, b),
             );
-            (x, N::prove(x, w, &mut rng))
+            let pi = N::prove(&x, &w, &mut rng);
+            (x, pi)
         },
-        |(x, pi)| N::verify(x, &pi),
+        |(x, pi)| N::verify(&x, &pi),
         BatchSize::SmallInput,
     );
 }
@@ -89,10 +90,10 @@ fn bench_verify_all(c: &mut Criterion) {
     fischlin.bench_function("G1", bench_verify::<G1Affine, Fischlin<G1Affine>>);
     fischlin.bench_function("G2", bench_verify::<G2Affine, Fischlin<G2Affine>>);
     fischlin.finish();
-    let mut sigma = c.benchmark_group("verify Sigma");
-    sigma.bench_function("G1", bench_verify::<G1Affine, Sigma<G1Affine>>);
-    sigma.bench_function("G2", bench_verify::<G2Affine, Sigma<G2Affine>>);
-    sigma.finish();
+    let mut fiatshamir = c.benchmark_group("verify Fiat-Shamir");
+    fiatshamir.bench_function("G1", bench_verify::<G1Affine, FiatShamir<G1Affine>>);
+    fiatshamir.bench_function("G2", bench_verify::<G2Affine, FiatShamir<G2Affine>>);
+    fiatshamir.finish();
 }
 
 criterion_group! {
