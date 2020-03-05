@@ -1,4 +1,5 @@
-use crate::ro::{RO, SplittableRng};
+use crate::ro::RO;
+use crate::util::Split;
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand::distributions::{Distribution, Standard};
@@ -28,12 +29,13 @@ pub trait NIZK: Relation {
     /// May panic if [`check(x, w)`] is `false`.
     ///
     /// [`check(x, w)`]: #method.check
-    fn prove<R: SplittableRng>(
+    fn prove<R: Split + Rng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
     ) -> Self::Proof
-    where R: Send;
+    where
+        R: Send;
     /// Verifies a proof against a statement.
     ///
     /// Must return `true` for valid proofs, and false for unsatisfiable
@@ -50,13 +52,15 @@ impl<X, W, H> Relation for ImplicitNIZK<X, W, H> {
     type X = X;
     type W = W;
 
-    fn check(_: &Self::X, _: &Self::W) -> bool { true }
+    fn check(_: &Self::X, _: &Self::W) -> bool {
+        true
+    }
 }
 
 impl<X, W, H> NIZK for ImplicitNIZK<X, W, H> {
     type Proof = ();
 
-    fn prove<R: SplittableRng>(
+    fn prove<R: Split + Rng>(
         _: &Self::X,
         _: &Self::W,
         _: &mut R,
@@ -73,7 +77,9 @@ impl<X, W, H> NIZK for ImplicitNIZK<X, W, H> {
 ///
 /// [1] Marc Fischlin. Communication-efficient non-interactive proofs of knowledge with online
 /// extractors. CRYPTO 2005.
-pub struct FischlinTransform<S: SigmaProtocol, H: RO + ?Sized>(PhantomData<(S, H)>);
+pub struct FischlinTransform<S: SigmaProtocol, H: RO + ?Sized>(
+    PhantomData<(S, H)>,
+);
 
 // Fischlin transform constants. These are the original constants presented in
 // the paper + 2. Achieves 128-bit security.
@@ -113,12 +119,13 @@ where
 {
     type Proof = Vec<(T::T, u16, T::R)>;
 
-    fn prove<R: SplittableRng>(
+    fn prove<R: Split + Rng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
     ) -> Self::Proof
-        where R: Send,
+    where
+        R: Send,
     {
         let rngs = (0..FISHLIN_REPETITIONS)
             .map(|_| rng.split())
@@ -148,10 +155,9 @@ where
                     .gen();
                     let r = T::prove_step_2(x, w, &z, &c);
                     // Randomness from the challenge/response pair must be low.
-                    let rnd = H::seq_query(
-                        &[t.as_ref(), c.as_ref(), r.as_ref()][..],
-                    )
-                    .raw();
+                    let rnd =
+                        H::seq_query(&[t.as_ref(), c.as_ref(), r.as_ref()][..])
+                            .raw();
                     let bits = fischlin_bits(rnd.as_ref());
                     if bits < min_val || min_r.is_none() {
                         min_r = Some(r);
@@ -169,9 +175,9 @@ where
                 )
             })
             .collect::<Vec<_>>()
-            // FIXME: This has a small chance of failing. (proof not being correct)
-            //  - calculate the chance 
-            //  - if non-negligible: increase FISHLIN_SAMPLES, or simply rerun on failure.
+        // FIXME: This has a small chance of failing. (proof not being correct)
+        //  - calculate the chance
+        //  - if non-negligible: increase FISHLIN_SAMPLES, or simply rerun on failure.
     }
 
     fn verify(x: &Self::X, pi: &Self::Proof) -> bool {
@@ -199,10 +205,9 @@ where
                     None
                 } else {
                     // And record the result bits
-                    let rnd = H::seq_query(
-                        &[t.as_ref(), c.as_ref(), r.as_ref()][..],
-                    )
-                    .raw();
+                    let rnd =
+                        H::seq_query(&[t.as_ref(), c.as_ref(), r.as_ref()][..])
+                            .raw();
                     Some(fischlin_bits(rnd.as_ref()))
                 }
             })
@@ -218,13 +223,13 @@ where
 /// A Sigma protocol
 pub trait SigmaProtocol: Relation {
     /// Auxiliary prover information passed from the first to the second proving step.
-    type Z;//: Copy;
+    type Z; //: Copy;
     /// The initial commitment
-    type T;//: Copy;
+    type T; //: Copy;
     /// The challenge
-    type C;//: Copy;
+    type C; //: Copy;
     /// The challenge response
-    type R;//: Copy;
+    type R; //: Copy;
 
     /// Step 1: Create commitments.
     fn prove_step_1<R: Rng + ?Sized>(
@@ -233,13 +238,25 @@ pub trait SigmaProtocol: Relation {
         rng: &mut R,
     ) -> (Self::Z, Self::T);
     /// Step 2: Respond to challenge
-    fn prove_step_2(x: &Self::X, w: &Self::W, z: &Self::Z, c: &Self::C) -> Self::R;
+    fn prove_step_2(
+        x: &Self::X,
+        w: &Self::W,
+        z: &Self::Z,
+        c: &Self::C,
+    ) -> Self::R;
     /// Final verification.
-    fn finish_verify(x: &Self::X, t: &Self::T, c: &Self::C, r: &Self::R) -> bool;
+    fn finish_verify(
+        x: &Self::X,
+        t: &Self::T,
+        c: &Self::C,
+        r: &Self::R,
+    ) -> bool;
 }
 
 /// The Fiat-Shamir transform of a sigma protocol.
-pub struct FiatShamirTransform<T: SigmaProtocol, H: RO + ?Sized>(PhantomData<(T, H)>);
+pub struct FiatShamirTransform<T: SigmaProtocol, H: RO + ?Sized>(
+    PhantomData<(T, H)>,
+);
 
 impl<T: SigmaProtocol, H: RO + ?Sized> Relation for FiatShamirTransform<T, H> {
     type X = T::X;
@@ -258,24 +275,20 @@ where
 {
     type Proof = (T::T, T::R);
 
-    fn prove<R: SplittableRng>(
+    fn prove<R: Split + Rng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
     ) -> Self::Proof {
         assert!(T::check(x, w));
         let (z, t) = T::prove_step_1(x, w, rng);
-        let c = H::seq_query(&[x.as_ref(), t.as_ref()][..])
-            .into_rng()
-            .gen();
+        let c = H::seq_query(&[x.as_ref(), t.as_ref()][..]).into_rng().gen();
         let r = T::prove_step_2(x, w, &z, &c);
         (t, r)
     }
 
     fn verify(x: &Self::X, &(ref t, ref r): &Self::Proof) -> bool {
-        let c = H::seq_query(&[x.as_ref(), t.as_ref()][..])
-            .into_rng()
-            .gen();
+        let c = H::seq_query(&[x.as_ref(), t.as_ref()][..]).into_rng().gen();
         T::finish_verify(x, t, &c, r)
     }
 }
@@ -300,7 +313,7 @@ impl<C: CurveAffine> CurvePair<C> {
 /// A pair of field elements
 pub struct FieldPair<F: PrimeField>(pub F, pub F, Vec<u8>);
 
-impl <F: PrimeField> FieldPair<F> {
+impl<F: PrimeField> FieldPair<F> {
     pub fn new(a: F, b: F) -> Self {
         let mut vec = Vec::new();
         for i in [a, b].iter() {
@@ -335,13 +348,14 @@ impl<C: CurveAffine> Relation for DualProofOfExponentSigmaProtocol<C> {
     type W = FieldPair<C::Scalar>;
 
     fn check(x: &Self::X, w: &Self::W) -> bool {
-        &CurvePair::new(C::one().mul(w.0).into_affine(), C::one().mul(w.1).into_affine()) == x
+        &CurvePair::new(
+            C::one().mul(w.0).into_affine(),
+            C::one().mul(w.1).into_affine(),
+        ) == x
     }
 }
 
-impl<C: CurveAffine> SigmaProtocol
-    for DualProofOfExponentSigmaProtocol<C>
-{
+impl<C: CurveAffine> SigmaProtocol for DualProofOfExponentSigmaProtocol<C> {
     type Z = FieldPair<C::Scalar>;
     type T = CurvePair<C>;
     type C = FieldPair<C::Scalar>;

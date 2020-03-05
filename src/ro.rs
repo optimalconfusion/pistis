@@ -1,14 +1,10 @@
+use crate::util::Split;
 use rand_core::block::{BlockRng, BlockRngCore};
 use rand_core::{CryptoRng, SeedableRng};
-use rand::Rng;
 use sha3::{Digest, Sha3_256};
 use std::marker::PhantomData;
 
-pub trait SplittableRng: Rng {
-    fn split(&mut self) -> Self;
-}
-
-impl<H: RO + ?Sized> SplittableRng for BlockRng<ROOutput<H>> {
+impl<H: RO + ?Sized> Split for BlockRng<ROOutput<H>> {
     fn split(&mut self) -> Self {
         let mut res = H::BlockOutput::default();
         self.core.generate(&mut res);

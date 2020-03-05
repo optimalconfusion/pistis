@@ -4,17 +4,17 @@ use pistis::ro::RO;
 use pistis::usrs::*;
 use rand::Rng;
 use sha3::Sha3_256;
-use std::time::Instant;
-use std::io::{Write, stdout};
-use std::path::Path;
-use std::fs::{create_dir_all, File, OpenOptions};
 use std::env::args;
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{stdout, Write};
+use std::path::Path;
+use std::time::Instant;
 
 const DS: &'static [usize] = &[
-    0x00_00_02, 0x00_00_04, 0x00_00_08, 0x00_00_10, 0x00_00_20,
-    0x00_00_40, 0x00_00_80, 0x00_01_00, 0x00_02_00, 0x00_04_00, 0x00_08_00,
-    0x00_10_00, 0x00_20_00, 0x00_40_00, 0x00_80_00, 0x01_00_00, 0x02_00_00,
-    0x04_00_00, 0x08_00_00, 0x10_00_00,
+    0x00_00_02, 0x00_00_04, 0x00_00_08, 0x00_00_10, 0x00_00_20, 0x00_00_40,
+    0x00_00_80, 0x00_01_00, 0x00_02_00, 0x00_04_00, 0x00_08_00, 0x00_10_00,
+    0x00_20_00, 0x00_40_00, 0x00_80_00, 0x01_00_00, 0x02_00_00, 0x04_00_00,
+    0x08_00_00, 0x10_00_00,
 ];
 
 const TRIALS_SMALL: usize = 100;
@@ -24,7 +24,11 @@ type Fischlin =
     FischlinTransform<DualProofOfExponentSigmaProtocol<G1Affine>, Sha3_256>;
 
 fn file<P: AsRef<Path>>(path: P) -> File {
-    OpenOptions::new().append(true).create(true).open(path).unwrap()
+    OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .unwrap()
 }
 
 fn main() {
@@ -43,25 +47,39 @@ fn main() {
     let mut agg_data = file("data/agg_verify.csv");
     // Test plain updates/verifies
     for (i, d) in DS.iter().enumerate().skip(skip) {
-        let trials = if *d < 0x01_00_00 { TRIALS_SMALL } else { TRIALS_LARGE };
+        let trials = if *d < 0x01_00_00 {
+            TRIALS_SMALL
+        } else {
+            TRIALS_LARGE
+        };
         print!("{} - {}/", i, d);
         stdout().flush().unwrap();
-        let srss = (0..trials).map(|_| USRS::new(*d).permute(&rng.gen())).collect::<Vec<_>>();
+        let srss = (0..trials)
+            .map(|_| USRS::new(*d).permute(&rng.gen()))
+            .collect::<Vec<_>>();
         print!("S");
         stdout().flush().unwrap();
-        let tu_upd = srss.iter().map(|srs| {
-            let t0 = Instant::now();
-            let upd = Update::<Bls12, Fischlin>::new(&srs, &mut rng);
-            let tu = t0.elapsed().as_millis();
-            (tu, upd)
-        }).collect::<Vec<_>>();
+        let tu_upd = srss
+            .iter()
+            .map(|srs| {
+                let t0 = Instant::now();
+                let upd = Update::<Bls12, Fischlin>::new(&srs, &mut rng);
+                let tu = t0.elapsed().as_millis();
+                (tu, upd)
+            })
+            .collect::<Vec<_>>();
         print!("P");
-        let tv = srss.iter().zip(tu_upd.iter()).map(|(srs, (_, upd))| {
-            let t0 = Instant::now();
-            assert!(upd.verify(&srs, &mut rng));
-            t0.elapsed().as_millis()
-        }).collect::<Vec<_>>();
-        let avg_tu: u128 = tu_upd.iter().map(|(t, _)| *t).sum::<u128>() / trials as u128;
+        let tv = srss
+            .iter()
+            .zip(tu_upd.iter())
+            .map(|(srs, (_, upd))| {
+                let t0 = Instant::now();
+                assert!(upd.verify(&srs, &mut rng));
+                t0.elapsed().as_millis()
+            })
+            .collect::<Vec<_>>();
+        let avg_tu: u128 =
+            tu_upd.iter().map(|(t, _)| *t).sum::<u128>() / trials as u128;
         let avg_tv: u128 = tv.into_iter().sum::<u128>() / trials as u128;
         writeln!(&mut prove_data, "{},{}", d, avg_tu).unwrap();
         writeln!(&mut verify_data, "{},{}", d, avg_tv).unwrap();
@@ -73,16 +91,22 @@ fn main() {
         skip = 0;
     }
     // For d=2, prove and verify update chains up to length 10,000
-    let mut aggs = (0..TRIALS_SMALL).map(|_| AggregateUpdate::<Bls12, Fischlin>::new(2)).collect::<Vec<_>>();
+    let mut aggs = (0..TRIALS_SMALL)
+        .map(|_| AggregateUpdate::<Bls12, Fischlin>::new(2))
+        .collect::<Vec<_>>();
     for i in (0..=3).skip(skip) {
         let l = i * 100;
         print!("{} - {}/", i + DS.len(), l);
         stdout().flush().unwrap();
-        let tav: u128 = aggs.iter_mut().map(|agg| {
-            let t0 = Instant::now();
-            assert!(agg.verify(&mut rng));
-            t0.elapsed().as_millis()
-        }).sum::<u128>() / TRIALS_SMALL as u128;
+        let tav: u128 = aggs
+            .iter_mut()
+            .map(|agg| {
+                let t0 = Instant::now();
+                assert!(agg.verify(&mut rng));
+                t0.elapsed().as_millis()
+            })
+            .sum::<u128>()
+            / TRIALS_SMALL as u128;
         writeln!(&mut agg_data, "{},{}", l, tav).unwrap();
         print!("AV");
         stdout().flush().unwrap();

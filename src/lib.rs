@@ -9,4 +9,4 @@ extern crate sha3;
 pub mod poe;
 pub mod ro;
 pub mod usrs;
-mod util;
+pub mod util;

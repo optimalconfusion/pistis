@@ -1,6 +1,5 @@
 use crate::poe::{CurvePair, FieldPair, NIZK};
-use crate::ro::SplittableRng;
-use crate::util::multiexp;
+use crate::util::{multiexp, Split};
 use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
@@ -70,10 +69,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
     /// Creates a randomly sampled update to a SRS.
-    pub fn new<R: SplittableRng>(
-        srs: &USRS<E>,
-        rng: &mut R,
-    ) -> Self
+    pub fn new<R: Split + Rng>(srs: &USRS<E>, rng: &mut R) -> Self
     where
         R: Send,
     {
@@ -91,7 +87,11 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
             srs: srs.permute(&trapdoor),
             g_y: g_y,
             g_by: g_by,
-            pi: N::prove(&CurvePair::new(g_y, g_by), &FieldPair::new(trapdoor.x, by), rng),
+            pi: N::prove(
+                &CurvePair::new(g_y, g_by),
+                &FieldPair::new(trapdoor.x, by),
+                rng,
+            ),
         }
     }
 
@@ -172,8 +172,18 @@ where
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
         if self.upds.len() == 0 {
-            check!(self.srs.h_x.iter().chain(self.srs.h_ax.iter()).all(|h_x| h_x == &h));
-            check!(self.srs.g_x.iter().chain(self.srs.g_ax.iter()).all(|g_x| g_x == &g));
+            check!(self
+                .srs
+                .h_x
+                .iter()
+                .chain(self.srs.h_ax.iter())
+                .all(|h_x| h_x == &h));
+            check!(self
+                .srs
+                .g_x
+                .iter()
+                .chain(self.srs.g_ax.iter())
+                .all(|g_x| g_x == &g));
             return true;
         }
         let e = E::pairing;

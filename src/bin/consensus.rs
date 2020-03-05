@@ -1,6 +1,6 @@
 use rand::distributions::Distribution;
 use rand::rngs::SmallRng;
-use rand::{Rng, thread_rng, SeedableRng};
+use rand::{thread_rng, Rng, SeedableRng};
 use rand_distr::Exp;
 use rayon::prelude::*;
 use std::cmp::{Ordering, Reverse};
@@ -22,17 +22,26 @@ struct ConsensusParameters {
 }
 
 impl ConsensusParameters {
-    fn new<R: Rng + ?Sized>(network_delay: f64, mean_block_time: f64, fraction_honest: f64, rng: &mut R) -> Self {
+    fn new<R: Rng + ?Sized>(
+        network_delay: f64,
+        mean_block_time: f64,
+        fraction_honest: f64,
+        rng: &mut R,
+    ) -> Self {
         let mut honest_presample = Vec::with_capacity(1 << PRESAMPLE_BITS);
         let mut adv_presample = Vec::with_capacity(1 << PRESAMPLE_BITS);
         for _ in 0..(1 << PRESAMPLE_BITS) {
-            honest_presample.push(Exp::new(fraction_honest / mean_block_time)
-                .unwrap()
-                .sample(rng)
-                + network_delay);
-            adv_presample.push(Exp::new((1f64 - fraction_honest) / mean_block_time)
-                .unwrap()
-                .sample(rng));
+            honest_presample.push(
+                Exp::new(fraction_honest / mean_block_time)
+                    .unwrap()
+                    .sample(rng)
+                    + network_delay,
+            );
+            adv_presample.push(
+                Exp::new((1f64 - fraction_honest) / mean_block_time)
+                    .unwrap()
+                    .sample(rng),
+            );
         }
         ConsensusParameters {
             honest_presample,
@@ -41,11 +50,13 @@ impl ConsensusParameters {
     }
 
     fn honest_time<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        self.honest_presample[rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
+        self.honest_presample
+            [rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
     }
 
     fn adversarial_time<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        self.adv_presample[rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
+        self.adv_presample
+            [rng.next_u32() as usize & ((1 << PRESAMPLE_BITS) - 1)]
     }
 }
 
@@ -188,7 +199,10 @@ impl Experiment {
 
     /// Returns the first recorded point (if any) which satisfies the given confidence level.
     fn conf(&self, conf: f64) -> Option<f64> {
-        let pos = match self.data.binary_search_by(|(_, y)| y.partial_cmp(&conf).expect("Probabilities must be comparable")) {
+        let pos = match self.data.binary_search_by(|(_, y)| {
+            y.partial_cmp(&conf)
+                .expect("Probabilities must be comparable")
+        }) {
             Ok(p) => p,
             Err(p) => p,
         };
@@ -228,18 +242,21 @@ pub fn main() {
     ]
     .into_par_iter()
     .for_each(|(h, len, step)| {
-        (0..=10).into_par_iter().map(|i| (i as f64 * step)).for_each(|d| {
-            Experiment::new(
-                ConsensusParameters::new(d, 1.0, h, &mut rng()),
-                5 * BASE_ITER,
-                2.0,
-                &mut rng(),
-            )
-            .run_until_time(len, &mut rng())
-            .record(&format!("network_delay_[h={:.2},d={:.2}]", h, d));
-            print!(".");
-            stdout().flush().unwrap();
-        });
+        (0..=10)
+            .into_par_iter()
+            .map(|i| (i as f64 * step))
+            .for_each(|d| {
+                Experiment::new(
+                    ConsensusParameters::new(d, 1.0, h, &mut rng()),
+                    5 * BASE_ITER,
+                    2.0,
+                    &mut rng(),
+                )
+                .run_until_time(len, &mut rng())
+                .record(&format!("network_delay_[h={:.2},d={:.2}]", h, d));
+                print!(".");
+                stdout().flush().unwrap();
+            });
     });
 
     // For each inter-block time, how long a (phase 1) bootstrap is needed (with 55% honest, 99.9%
@@ -247,33 +264,42 @@ pub fn main() {
     [0.55, 0.67, 0.9].par_iter().for_each(|h| {
         //for c in [0.999, 0.9999, 0.99999].iter() {
         let confs = [0.999, 0.9999, 0.99999];
-        let data =
-            (1..=250)
-                .into_par_iter()
-                .map(|i| {
-                    let b = i as f64 * 0.1;
-                    let mut exp = Experiment::new(
-                        ConsensusParameters::new(1.0, b, *h, &mut rng()),
-                        BASE_ITER,
-                        1.0,
-                        &mut rng(),
-                    );
-                    stdout().flush().unwrap();
-                    exp.run_until_confidence(confs[confs.len() - 1], 15_000.0 * b, &mut rng());
-                    print!(".");
-                    stdout().flush().unwrap();
-                    (b, confs.iter().map(|c| exp.conf(*c)).collect::<Vec<_>>())
-                })
-                    .collect::<Vec<_>>();
-            let mut fs = confs.iter().map(|c| File::create(format!(
-                "data/bootstrap_[h={:.2},c={:.5}].csv",
-                h, c
-            )).unwrap()).collect::<Vec<_>>();
-            for f in fs.iter_mut() {
-                writeln!(f, "#block-time,bootstrap-length").unwrap();
-            }
-            for (b, res) in data.into_iter() {
-                for (res, f) in res.into_iter().zip(fs.iter_mut()) {
+        let data = (1..=250)
+            .into_par_iter()
+            .map(|i| {
+                let b = i as f64 * 0.1;
+                let mut exp = Experiment::new(
+                    ConsensusParameters::new(1.0, b, *h, &mut rng()),
+                    BASE_ITER,
+                    1.0,
+                    &mut rng(),
+                );
+                stdout().flush().unwrap();
+                exp.run_until_confidence(
+                    confs[confs.len() - 1],
+                    15_000.0 * b,
+                    &mut rng(),
+                );
+                print!(".");
+                stdout().flush().unwrap();
+                (b, confs.iter().map(|c| exp.conf(*c)).collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>();
+        let mut fs = confs
+            .iter()
+            .map(|c| {
+                File::create(format!(
+                    "data/bootstrap_[h={:.2},c={:.5}].csv",
+                    h, c
+                ))
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        for f in fs.iter_mut() {
+            writeln!(f, "#block-time,bootstrap-length").unwrap();
+        }
+        for (b, res) in data.into_iter() {
+            for (res, f) in res.into_iter().zip(fs.iter_mut()) {
                 if let Some(res) = res {
                     writeln!(f, "{},{}", b, res).unwrap();
                 }

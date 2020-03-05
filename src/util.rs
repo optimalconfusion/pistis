@@ -2,9 +2,15 @@ use ff::{PrimeField, PrimeFieldRepr, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use rayon::prelude::*;
 
+/// Split into independant copies. Differs from `Clone` in that the copies should act *not* be
+/// equal.
+pub trait Split {
+    fn split(&mut self) -> Self;
+}
+
 // Sourced from https://github.com/ebfull/sonic. Licensed under MIT
 // Adapted to introduce parallelism.
-pub fn multiexp<
+pub(crate) fn multiexp<
     'a,
     G: CurveAffine,
     IB: IntoIterator<Item = &'a G>,

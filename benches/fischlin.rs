@@ -13,7 +13,8 @@ use sha3::Sha3_256;
 
 type Fischlin<C> =
     FischlinTransform<DualProofOfExponentSigmaProtocol<C>, Sha3_256>;
-type FiatShamir<C> = FiatShamirTransform<DualProofOfExponentSigmaProtocol<C>, Sha3_256>;
+type FiatShamir<C> =
+    FiatShamirTransform<DualProofOfExponentSigmaProtocol<C>, Sha3_256>;
 
 fn bench_prove<
     C: CurveAffine,
@@ -50,8 +51,10 @@ fn bench_prove_all(c: &mut Criterion) {
     fischlin.bench_function("G2", bench_prove::<G2Affine, Fischlin<G2Affine>>);
     fischlin.finish();
     let mut fiatshamir = c.benchmark_group("prove Fiat-Shamir");
-    fiatshamir.bench_function("G1", bench_prove::<G1Affine, FiatShamir<G1Affine>>);
-    fiatshamir.bench_function("G2", bench_prove::<G2Affine, FiatShamir<G2Affine>>);
+    fiatshamir
+        .bench_function("G1", bench_prove::<G1Affine, FiatShamir<G1Affine>>);
+    fiatshamir
+        .bench_function("G2", bench_prove::<G2Affine, FiatShamir<G2Affine>>);
     fiatshamir.finish();
 }
 
@@ -91,8 +94,10 @@ fn bench_verify_all(c: &mut Criterion) {
     fischlin.bench_function("G2", bench_verify::<G2Affine, Fischlin<G2Affine>>);
     fischlin.finish();
     let mut fiatshamir = c.benchmark_group("verify Fiat-Shamir");
-    fiatshamir.bench_function("G1", bench_verify::<G1Affine, FiatShamir<G1Affine>>);
-    fiatshamir.bench_function("G2", bench_verify::<G2Affine, FiatShamir<G2Affine>>);
+    fiatshamir
+        .bench_function("G1", bench_verify::<G1Affine, FiatShamir<G1Affine>>);
+    fiatshamir
+        .bench_function("G2", bench_verify::<G2Affine, FiatShamir<G2Affine>>);
     fiatshamir.finish();
 }
 
