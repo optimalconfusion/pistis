@@ -3,7 +3,7 @@ use crate::util::Split;
 use ff::{Field, PrimeField};
 use group::{CurveAffine, CurveProjective};
 use rand::distributions::{Distribution, Standard};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 use rayon::prelude::*;
 use std::marker::PhantomData;
 
@@ -29,7 +29,7 @@ pub trait NIZK: Relation {
     /// May panic if [`check(x, w)`] is `false`.
     ///
     /// [`check(x, w)`]: #method.check
-    fn prove<R: Split + Rng>(
+    fn prove<R: Split + Rng + CryptoRng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
@@ -60,7 +60,7 @@ impl<X, W, H> Relation for ImplicitNIZK<X, W, H> {
 impl<X, W, H> NIZK for ImplicitNIZK<X, W, H> {
     type Proof = ();
 
-    fn prove<R: Split + Rng>(
+    fn prove<R: Split + Rng + CryptoRng>(
         _: &Self::X,
         _: &Self::W,
         _: &mut R,
@@ -119,7 +119,7 @@ where
 {
     type Proof = Vec<(T::T, u16, T::R)>;
 
-    fn prove<R: Split + Rng>(
+    fn prove<R: Split + Rng + CryptoRng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
@@ -232,7 +232,7 @@ pub trait SigmaProtocol: Relation {
     type R; //: Copy;
 
     /// Step 1: Create commitments.
-    fn prove_step_1<R: Rng + ?Sized>(
+    fn prove_step_1<R: Rng + CryptoRng + ?Sized>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
@@ -275,7 +275,7 @@ where
 {
     type Proof = (T::T, T::R);
 
-    fn prove<R: Split + Rng>(
+    fn prove<R: Split + Rng + CryptoRng>(
         x: &Self::X,
         w: &Self::W,
         rng: &mut R,
@@ -361,7 +361,7 @@ impl<C: CurveAffine> SigmaProtocol for DualProofOfExponentSigmaProtocol<C> {
     type C = FieldPair<C::Scalar>;
     type R = FieldPair<C::Scalar>;
 
-    fn prove_step_1<R: Rng + ?Sized>(
+    fn prove_step_1<R: Rng + CryptoRng + ?Sized>(
         _: &Self::X,
         _: &Self::W,
         rng: &mut R,

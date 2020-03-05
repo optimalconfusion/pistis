@@ -4,7 +4,7 @@ use ff::{Field, ScalarEngine};
 use group::{CurveAffine, CurveProjective};
 use pairing::{Engine, PairingCurveAffine};
 use rand::distributions::{Distribution, Standard};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 use rayon::iter::once;
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -69,7 +69,7 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     Update<E, N>
 {
     /// Creates a randomly sampled update to a SRS.
-    pub fn new<R: Split + Rng>(srs: &USRS<E>, rng: &mut R) -> Self
+    pub fn new<R: Split + Rng + CryptoRng>(srs: &USRS<E>, rng: &mut R) -> Self
     where
         R: Send,
     {
@@ -96,7 +96,11 @@ impl<E: Engine, N: NIZK<X = CurvePair<E::G1Affine>, W = FieldPair<E::Fr>>>
     }
 
     /// Verify the SRS update.
-    pub fn verify<R: Rng + ?Sized>(&self, srs: &USRS<E>, rng: &mut R) -> bool {
+    pub fn verify<R: Rng + CryptoRng + ?Sized>(
+        &self,
+        srs: &USRS<E>,
+        rng: &mut R,
+    ) -> bool {
         let d = srs.d;
         let g = E::G1Affine::one();
         let e = E::pairing;
@@ -168,7 +172,7 @@ where
     }
 
     /// Verifies the series of updates.
-    pub fn verify<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
+    pub fn verify<R: Rng + CryptoRng + ?Sized>(&self, rng: &mut R) -> bool {
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
         if self.upds.len() == 0 {
@@ -278,7 +282,10 @@ impl<E: Engine> USRS<E> {
     }
 
     /// Verifies the SRS structure.
-    pub fn verify_structure<R: Rng + ?Sized>(&self, rng: &mut R) -> bool {
+    pub fn verify_structure<R: Rng + CryptoRng + ?Sized>(
+        &self,
+        rng: &mut R,
+    ) -> bool {
         let g = E::G1Affine::one();
         let h = E::G2Affine::one();
         let e = E::pairing;
