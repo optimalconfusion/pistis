@@ -1,4 +1,4 @@
-# Implementations to accompany "Reference Strings from Chain Quality"
+# Implementations to accompany "SNARK Enhanced Blockchains for Free"
 
 This repository provides open source implementations of the Sonic uSRS update
 procedure, modified to use a simple Fischlin-transformed sigma protocol as
