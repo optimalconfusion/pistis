@@ -1,4 +1,4 @@
-# Implementations to accompany "SNARK Enhanced Blockchains for Free"
+# Implementations to accompany "Mining for Privacy"
 
 This repository provides open source implementations of the Sonic uSRS update
 procedure, modified to use a simple Fischlin-transformed sigma protocol as
